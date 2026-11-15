@@ -144,7 +144,7 @@ internal abstract class StageExecutor : Executor<StageResult, StageResult>
 }
 
 /// <summary>
-/// Stage 1: read the LinkedIn screenshot. A screenshot may list several jobs: the first stays with this job and every other one
+/// Stage 1: read the screenshot of a job posting (from any job site or message). A screenshot may list several jobs: the first stays with this job and every other one
 /// becomes a job of its own (same image, details already filled in), queued at once so they run in parallel like any other.
 /// </summary>
 internal sealed class ExtractExecutor : StageExecutor

@@ -1,6 +1,23 @@
 # JobApplier
 
-A local ASP.NET Core MVC app that turns **LinkedIn job screenshots into job applications**, using your own Claude or
+**Share a screenshot of any job. JobApplier applies for it.**
+
+It works for **any job** - any role, industry or company - and from any source: a LinkedIn or Indeed listing, a company
+careers page, a recruiter's message, a post someone shared. If the screenshot shows the role and the company, that is enough.
+One screenshot can show a single posting or a whole list of results; every job in it is handled, in parallel.
+
+In short:
+
+1. Add your resume once, on the **Profile** page.
+2. Screenshot any job and drop it on the **Dashboard** (or paste it with `Ctrl+V`).
+3. Press **Start jobs**. You approve each application before it is sent, unless you turn on auto-submit.
+
+> **Use at your own risk.** Automating applications can get an account flagged or banned on some sites, and an application sent
+> in your name is yours. Review-before-submit is on by default for that reason; leave it on until you trust the results.
+
+## What it does
+
+A local ASP.NET Core MVC app that turns **job screenshots into job applications**, using your own Claude or
 Google Gemini account (your choice in Settings). Drop in one or many screenshots; for each one it
 
 1. **reads the screenshot** (company, role, location, skills, description). A screenshot of a *list* of jobs is split: every
