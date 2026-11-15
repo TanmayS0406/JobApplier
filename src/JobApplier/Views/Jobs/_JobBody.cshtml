@@ -1,0 +1,210 @@
+@model JobDetailsViewModel
+@{
+    var job = Model.Job;
+    var terminal = job.Status.IsTerminal();
+    var extracted = job.Extracted;
+    var found = job.Found;
+    var match = job.Match;
+
+    static string Time(DateTime utc) => utc.ToLocalTime().ToString("HH:mm:ss");
+    static bool IsWeb(string? url, out Uri uri)
+    {
+        uri = default!;
+        return Uri.TryCreate(url, UriKind.Absolute, out var parsed) && (parsed.Scheme == "https" || parsed.Scheme == "http") && (uri = parsed) != null;
+    }
+}
+
+<div data-terminal="@(terminal ? "true" : "false")">
+    <section class="card">
+        <div class="card-head">
+            <div>
+                <h1>@Model.Company</h1>
+                <div class="muted">@Model.Title@(string.IsNullOrEmpty(job.Found?.Location ?? job.Extracted?.Location) ? "" : " - " + (job.Found?.Location ?? job.Extracted?.Location))</div>
+            </div>
+            <div class="status-block">
+                <span class="chip big status-@job.Status.ToString().ToLowerInvariant()">@job.Status.Label()</span>
+                @if (job.PendingHelp != null) { <span class="chip chip-alert">needs you</span> }
+            </div>
+        </div>
+        @if (!string.IsNullOrWhiteSpace(job.StatusDetail))
+        {
+            <p class="status-detail-big">@job.StatusDetail</p>
+        }
+        @if (job.Status == JobStatus.Failed && job.LimitHit && job.RetryAfterUtc is DateTime retryAt)
+        {
+            <div class="banner banner-warn">
+                <strong>Stopped by the AI usage limit.</strong>
+                @(job.LimitResetKnown ? "It should reset" : "The reset time is not known; the next check is")
+                about @retryAt.ToLocalTime().ToString("ddd HH:mm").
+                @if (job.AutoRetry)
+                {
+                    <span>This job is <strong>waiting</strong> and will retry by itself@(job.LimitRetries > 0 ? $" (attempt {job.LimitRetries} of {JobApplier.Services.JobRunner.MaxAutoRetries})" : "").</span>
+                }
+            </div>
+        }
+        <p class="muted small">
+            @(job.Options.AutoSubmit ? "Submits automatically." : "Waits for your approval before submitting.")
+            @(job.Options.MinMatchPercent > 0 ? $"Skips below {job.Options.MinMatchPercent}% match." : "")
+            Added @job.CreatedUtc.ToLocalTime().ToString("g").
+        </p>
+
+        <div class="actions">
+            @if (!terminal && Model.IsActive)
+            {
+                <form method="post" asp-controller="Jobs" asp-action="Cancel" asp-route-id="@job.Id"><button class="btn">Cancel</button></form>
+            }
+            @if (terminal && !Model.IsActive)
+            {
+                @if (job.Status == JobStatus.Failed && job.LimitHit)
+                {
+                    // Stopped on a usage limit: it can wait for the reset instead of being retried by hand.
+                    @if (job.AutoRetry)
+                    {
+                        <form method="post" asp-controller="Jobs" asp-action="StopWaiting" asp-route-id="@job.Id"><button class="btn">Stop waiting</button></form>
+                    }
+                    else
+                    {
+                        <form method="post" asp-controller="Jobs" asp-action="RetryWhenAvailable" asp-route-id="@job.Id"><button class="btn primary">Retry when available</button></form>
+                    }
+                }
+                @if (job.Status != JobStatus.Applied)
+                {
+                    // An applied job is finished: retrying it would submit a second application.
+                    <form method="post" asp-controller="Jobs" asp-action="Retry" asp-route-id="@job.Id"><button class="btn @(job.LimitHit ? "" : "primary")">@(job.LimitHit ? "Retry now" : "Retry")</button></form>
+                }
+                @if (job.Status == JobStatus.Skipped && match != null && job.Options.MinMatchPercent > 0 && job.Apply == null)
+                {
+                    <form method="post" asp-controller="Jobs" asp-action="Retry" asp-route-id="@job.Id">
+                        <input type="hidden" name="applyAnyway" value="true" />
+                        <button class="btn">Apply anyway</button>
+                    </form>
+                }
+                <form method="post" asp-controller="Jobs" asp-action="Delete" asp-route-id="@job.Id" data-confirm="Delete this job and its files?"><button class="btn ghost">Delete</button></form>
+            }
+        </div>
+    </section>
+
+    @if (job.PendingHelp != null)
+    {
+        <section class="needs-you">
+            <h2>Needs you</h2>
+            <article class="help-card">
+                @await Html.PartialAsync("_Help", new HelpItem(job.Id, Model.Company, Model.Title, job.PendingHelp))
+            </article>
+        </section>
+    }
+
+    <div class="grid-2">
+        <section class="card">
+            <h2>The posting</h2>
+            @if (extracted == null)
+            {
+                <p class="muted">Not read yet.</p>
+            }
+            else
+            {
+                <dl class="facts">
+                    <dt>Role</dt><dd>@extracted.Title</dd>
+                    <dt>Company</dt><dd>@extracted.Company</dd>
+                    @if (extracted.Location.Length > 0) { <dt>Location</dt><dd>@extracted.Location (@extracted.WorkMode)</dd> }
+                    @if (extracted.EmploymentType.Length > 0) { <dt>Type</dt><dd>@extracted.EmploymentType</dd> }
+                    @if (extracted.Salary.Length > 0) { <dt>Pay</dt><dd>@extracted.Salary</dd> }
+                    @if (found != null)
+                    {
+                        <dt>Real posting</dt>
+                        <dd>
+                            @if (found.Found && IsWeb(found.Url, out var postingUri))
+                            {
+                                <a href="@postingUri.AbsoluteUri" target="_blank" rel="noopener noreferrer">@(found.Portal.Length > 0 ? found.Portal : postingUri.Host)</a>
+                                <span class="muted small">(@found.Confidence confidence)</span>
+                            }
+                            else
+                            {
+                                <span class="muted">Not found. @found.Notes</span>
+                            }
+                        </dd>
+                    }
+                </dl>
+                @if (extracted.Skills.Count > 0)
+                {
+                    <div class="chips">
+                        @foreach (var skill in extracted.Skills) { <span class="chip chip-skill">@skill</span> }
+                    </div>
+                }
+            }
+            @if (Model.HasScreenshot)
+            {
+                <a class="shot" href="@Url.Action("Screenshot", "Jobs", new { id = job.Id })" target="_blank" rel="noopener">
+                    <img src="@Url.Action("Screenshot", "Jobs", new { id = job.Id })" alt="Screenshot of the posting" loading="lazy" />
+                </a>
+            }
+        </section>
+
+        <section class="card">
+            <h2>Match with your resume</h2>
+            @if (match == null)
+            {
+                <p class="muted">Not scored yet.</p>
+            }
+            else
+            {
+                var band = match.Percent >= 75 ? "high" : match.Percent >= 50 ? "mid" : "low";
+                <div class="match-big">
+                    <meter class="match band-@band" min="0" max="100" value="@match.Percent"></meter>
+                    <strong>@match.Percent%</strong>
+                </div>
+                <p>@match.Summary</p>
+                <table class="scores">
+                    <tr><td>Skills <span class="muted small">40%</span></td><td><meter min="0" max="100" value="@match.SkillsScore"></meter></td><td>@match.SkillsScore</td></tr>
+                    <tr><td>Experience <span class="muted small">25%</span></td><td><meter min="0" max="100" value="@match.ExperienceScore"></meter></td><td>@match.ExperienceScore</td></tr>
+                    <tr><td>Domain <span class="muted small">15%</span></td><td><meter min="0" max="100" value="@match.DomainScore"></meter></td><td>@match.DomainScore</td></tr>
+                    <tr><td>Seniority <span class="muted small">10%</span></td><td><meter min="0" max="100" value="@match.SeniorityScore"></meter></td><td>@match.SeniorityScore</td></tr>
+                    <tr><td>Logistics <span class="muted small">10%</span></td><td><meter min="0" max="100" value="@match.LogisticsScore"></meter></td><td>@match.LogisticsScore</td></tr>
+                </table>
+                @if (match.MatchedSkills.Count > 0)
+                {
+                    <h3>You have</h3>
+                    <div class="chips">@foreach (var s in match.MatchedSkills) { <span class="chip chip-good">@s</span> }</div>
+                }
+                @if (match.MissingSkills.Count > 0)
+                {
+                    <h3>Gaps</h3>
+                    <div class="chips">@foreach (var s in match.MissingSkills) { <span class="chip chip-gap">@s</span> }</div>
+                }
+            }
+        </section>
+    </div>
+
+    @if (job.Apply != null || job.AccountRecorded)
+    {
+        <section class="card">
+            <h2>Application</h2>
+            @if (job.Apply != null)
+            {
+                <p><span class="chip status-@(job.Apply.Result == ApplyResultKind.Submitted || job.Apply.Result == ApplyResultKind.AlreadyApplied ? "applied" : "failed")">@job.Apply.Result</span> @job.Apply.Summary</p>
+                @if (!string.IsNullOrWhiteSpace(job.Apply.Confirmation)) { <p class="muted">Confirmation: @job.Apply.Confirmation</p> }
+            }
+            @if (job.AccountRecorded)
+            {
+                <p>An account was used for this application with <strong>@Model.ProfileEmail</strong>. The password is in <code>@Model.AccountsDocumentPath</code>.</p>
+            }
+        </section>
+    }
+
+    <section class="card">
+        <h2>Activity</h2>
+        @if (job.Log.Count == 0)
+        {
+            <p class="muted">Nothing yet.</p>
+        }
+        else
+        {
+            <ol class="log">
+                @foreach (var entry in Enumerable.Reverse(job.Log))
+                {
+                    <li class="log-@entry.Kind"><time>@Time(entry.Utc)</time> <span class="kind">@entry.Kind</span> <span>@entry.Text</span></li>
+                }
+            </ol>
+        }
+    </section>
+</div>

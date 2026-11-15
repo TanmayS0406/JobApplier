@@ -1,0 +1,81 @@
+@model ProfileViewModel
+@{
+    ViewData["Title"] = "Profile";
+    var p = Model.Profile;
+    var answers = p.Answers.ToList();
+    while (answers.Count < p.Answers.Count + 2) { answers.Add(new SavedAnswer()); }
+}
+
+<section class="card">
+    <h2>Resume</h2>
+    @if (Model.HasResume)
+    {
+        <p>Current resume: <strong>@p.ResumeFileName</strong>
+            (<a asp-action="Resume" target="_blank" rel="noopener">open the file that gets uploaded</a>)
+            @if (!string.IsNullOrWhiteSpace(p.Email)) { <span class="muted"> &middot; accounts are created with <strong>@p.Email</strong></span> }
+        </p>
+    }
+    else
+    {
+        <p class="muted">No resume yet. Upload it and Claude will read the details into the form below.</p>
+    }
+    <form asp-action="UploadResume" method="post" enctype="multipart/form-data" data-busy="Reading your resume with Claude - this can take up to a minute...">
+        <input type="file" name="resume" accept=".pdf,.docx,.txt,.md,.png,.jpg,.jpeg" required />
+        <button class="btn primary" type="submit">@(Model.HasResume ? "Replace resume" : "Upload resume") and read it</button>
+    </form>
+    <p class="muted small">PDF, Word (.docx), text or an image of it. Reading it again keeps the answers you typed below.</p>
+</section>
+
+<form asp-action="Save" method="post">
+    <section class="card">
+        <h2>About you</h2>
+        <p class="muted small">Filled from your resume - correct anything that is wrong. This is exactly what the agent types into application forms.</p>
+        <div class="form-grid">
+            <label>Full name<input name="FullName" value="@p.FullName" /></label>
+            <label>E-mail <small>(used for every account)</small><input name="Email" type="email" value="@p.Email" /></label>
+            <label>Phone<input name="Phone" value="@p.Phone" /></label>
+            <label>Location<input name="Location" value="@p.Location" /></label>
+            <label>LinkedIn<input name="LinkedInUrl" value="@p.LinkedInUrl" /></label>
+            <label>GitHub<input name="GitHubUrl" value="@p.GitHubUrl" /></label>
+            <label>Portfolio / website<input name="PortfolioUrl" value="@p.PortfolioUrl" /></label>
+            <label>Current title<input name="CurrentTitle" value="@p.CurrentTitle" /></label>
+            <label>Current company<input name="CurrentCompany" value="@p.CurrentCompany" /></label>
+            <label>Years of experience<input name="YearsOfExperience" value="@p.YearsOfExperience" /></label>
+            <label class="wide">Education<input name="Education" value="@p.Education" /></label>
+            <label class="wide">Skills <small>(comma separated)</small><input name="skillsText" value="@Model.SkillsText" /></label>
+            <label class="wide">Summary<textarea name="Summary" rows="3">@p.Summary</textarea></label>
+        </div>
+    </section>
+
+    <section class="card">
+        <h2>Things forms ask that resumes do not say</h2>
+        <p class="muted small">Leave blank if you want to be asked when a form needs it.</p>
+        <div class="form-grid">
+            <label>Work authorisation / visa status<input name="WorkAuthorization" value="@p.WorkAuthorization" placeholder="e.g. Authorised to work in the UK, no sponsorship needed" /></label>
+            <label>Notice period<input name="NoticePeriod" value="@p.NoticePeriod" placeholder="e.g. 1 month" /></label>
+            <label>Expected salary<input name="ExpectedSalary" value="@p.ExpectedSalary" placeholder="e.g. 90,000 USD" /></label>
+            <label class="wide">Anything else the agent should know<textarea name="Notes" rows="2">@p.Notes</textarea></label>
+        </div>
+
+        <h3>Saved answers</h3>
+        <p class="muted small">Questions you answered while an application was paused are stored here and reused automatically.</p>
+        <div class="qa-list">
+            @for (var i = 0; i < answers.Count; i++)
+            {
+                <div class="qa">
+                    <input name="Answers[@i].Question" value="@answers[i].Question" placeholder="Question" />
+                    <input name="Answers[@i].Answer" value="@answers[i].Answer" placeholder="Answer" />
+                </div>
+            }
+        </div>
+    </section>
+
+    <section class="card">
+        <details>
+            <summary>Resume text <span class="muted small">(used for scoring and for form questions - fix reading mistakes here)</span></summary>
+            <textarea name="ResumeText" rows="16" class="mono">@p.ResumeText</textarea>
+        </details>
+    </section>
+
+    <div class="actions"><button class="btn primary" type="submit">Save profile</button></div>
+</form>

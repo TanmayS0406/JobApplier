@@ -1,0 +1,142 @@
+@model LiveViewModel
+@{
+    var running = Model.Rows.Count(r => !r.Status.IsTerminal());
+    var applied = Model.Rows.Count(r => r.Status == JobStatus.Applied);
+    // A failed job that is waiting for a usage limit to reset is not abandoned, so it is neither "failed" to clear nor counted twice.
+    var waiting = Model.Rows.Count(r => r.Status == JobStatus.Failed && r.LimitHit && r.AutoRetry);
+    var limited = Model.Rows.Count(r => r.Status == JobStatus.Failed && r.LimitHit && !r.AutoRetry);
+    var failedAll = Model.Rows.Count(r => r.Status == JobStatus.Failed);
+    var failed = failedAll - waiting;
+}
+
+@if (Model.PausedUntilUtc is DateTime pausedUntil)
+{
+    <div class="banner banner-warn">
+        <strong>The AI usage limit was reached.</strong>
+        Jobs that have not started are waiting and will start by themselves at about @pausedUntil.ToLocalTime().ToString("ddd HH:mm").
+    </div>
+}
+
+@if (Model.Help.Count > 0)
+{
+    <section class="needs-you" data-help-count="@Model.Help.Count">
+        <h2>Needs you (@Model.Help.Count)</h2>
+        @foreach (var item in Model.Help)
+        {
+            <article class="help-card">
+                <header>
+                    <strong>@item.Company</strong> <span class="muted">@item.Title</span>
+                    <a class="small" asp-controller="Jobs" asp-action="Details" asp-route-id="@item.JobId">details</a>
+                </header>
+                @await Html.PartialAsync("_Help", item)
+            </article>
+        }
+    </section>
+}
+
+<section class="card">
+    <div class="card-head">
+        <h2>Results</h2>
+        @if (Model.Rows.Count > 0)
+        {
+            <div class="head-tools">
+                <span class="muted small">@Model.Rows.Count job@(Model.Rows.Count == 1 ? "" : "s") &middot; @running running &middot; @applied applied@(waiting > 0 ? $" · {waiting} waiting for the limit" : "")</span>
+                @if (failedAll > 0)
+                {
+                    <form asp-controller="Jobs" asp-action="RetryAllFailed" method="post"
+                          data-confirm="Retry all @failedAll failed job@(failedAll == 1 ? "" : "s") now? They start a few at a time (see Settings) in the order they were added. A job that stopped on a usage limit fails again if the limit has not reset yet - use 'Retry when available' for those.">
+                        <button class="btn primary compact" type="submit" title="Queue every failed job again. Work that already succeeded (reading the screenshot, finding the posting, the match score) is kept.">Retry all failed (@failedAll)</button>
+                    </form>
+                }
+                @if (limited > 0)
+                {
+                    <form asp-controller="Jobs" asp-action="RetryAllWhenAvailable" method="post">
+                        <button class="btn compact" type="submit" title="These stopped because the AI ran out of tokens. They will be retried by themselves once the limit has reset.">Retry when available (@limited)</button>
+                    </form>
+                }
+                @if (failed > 0)
+                {
+                    <form asp-controller="Jobs" asp-action="ClearFailed" method="post"
+                          data-confirm="Delete @failed failed job@(failed == 1 ? "" : "s") and their files? Accounts and the list of applied postings are kept, but a deleted job can no longer be retried.">
+                        <button class="btn ghost compact" type="submit">Clear failed (@failed)</button>
+                    </form>
+                }
+            </div>
+        }
+    </div>
+
+    @if (Model.Rows.Count == 0)
+    {
+        <p class="muted">Nothing yet. Add some screenshots above.</p>
+    }
+    else
+    {
+        <div class="table-wrap">
+            <table class="results">
+                <thead>
+                    <tr>
+                        <th>Company / role</th>
+                        <th>Location</th>
+                        <th class="match-col">Match with your resume</th>
+                        <th>Status</th>
+                        <th>Posting</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var row in Model.Rows)
+                    {
+                        <tr>
+                            <td>
+                                <a class="job-link" asp-controller="Jobs" asp-action="Details" asp-route-id="@row.Id"><strong>@row.Company</strong></a>
+                                <div class="muted small">@row.Title</div>
+                            </td>
+                            <td>@(string.IsNullOrEmpty(row.Location) ? "-" : row.Location)</td>
+                            <td class="match-col">
+                                @if (row.MatchPercent is int percent)
+                                {
+                                    <div class="match-cell">
+                                        <meter class="match band-@row.MatchBand" min="0" max="100" value="@percent"></meter>
+                                        <strong>@percent%</strong>
+                                    </div>
+                                }
+                                else
+                                {
+                                    <span class="muted">-</span>
+                                }
+                            </td>
+                            <td>
+                                <span class="chip status-@row.Status.ToString().ToLowerInvariant()">@row.Status.Label()</span>
+                                @if (row.NeedsUser)
+                                {
+                                    <span class="chip chip-alert">needs you</span>
+                                }
+                                @if (row.Status == JobStatus.Failed && row.LimitHit)
+                                {
+                                    <span class="chip chip-limit">@(row.AutoRetry ? "waiting for limit" : "usage limit")</span>
+                                    @if (row.AutoRetry && row.RetryAfterUtc is DateTime retryAt)
+                                    {
+                                        <span class="muted small">retries about @retryAt.ToLocalTime().ToString("ddd HH:mm")</span>
+                                    }
+                                }
+                                @if (!string.IsNullOrWhiteSpace(row.StatusDetail))
+                                {
+                                    <div class="muted small status-detail">@row.StatusDetail</div>
+                                }
+                            </td>
+                            <td>
+                                @if (row.PostingUrl is { Length: > 0 } url && Uri.TryCreate(url, UriKind.Absolute, out var uri) && (uri.Scheme == "https" || uri.Scheme == "http"))
+                                {
+                                    <a href="@uri.AbsoluteUri" target="_blank" rel="noopener noreferrer">@(string.IsNullOrWhiteSpace(row.Portal) ? uri.Host : row.Portal)</a>
+                                }
+                                else
+                                {
+                                    <span class="muted">-</span>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</section>

@@ -1,0 +1,57 @@
+@model DashboardViewModel
+@{
+    ViewData["Title"] = "Dashboard";
+}
+
+@if (!Model.HasResume || !Model.HasEmail)
+{
+    <div class="banner banner-warn">
+        <strong>One thing first:</strong> add your resume on the <a asp-controller="Profile" asp-action="Index">Profile page</a>.
+        Matching needs its text, and the e-mail address on it is the one used for every account the agent creates.
+    </div>
+}
+
+<section class="card">
+    <h2>Add job screenshots</h2>
+    <p class="muted">
+        Drop one or more LinkedIn screenshots, of a single posting or of a list of jobs. The AI agent (Claude or Gemini, chosen in Settings) reads each screenshot and every job in it
+        becomes its own job: it finds the real posting on the company's site, scores it against your resume, and fills in the
+        application in its own browser window. Up to <strong>@Model.MaxParallel</strong> jobs run at the same time; the rest wait
+        for a free slot (change the limit in Settings).
+    </p>
+
+    <form id="upload-form" asp-controller="Jobs" asp-action="Upload" method="post" enctype="multipart/form-data">
+        <div id="dropzone" class="dropzone" tabindex="0">
+            <input id="screenshots" type="file" name="screenshots" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden />
+            <p><strong>Drop screenshots here</strong> or <button type="button" id="pick-files" class="link">choose files</button></p>
+            <p class="muted small">PNG, JPG, WebP or GIF, up to 20 MB each, 30 at a time. You can paste with Ctrl+V too.</p>
+            <div id="previews" class="previews"></div>
+        </div>
+
+        <div class="options">
+            <label class="check">
+                <input type="checkbox" name="autoSubmit" value="true" @(Model.DefaultAutoSubmit ? "checked" : null) />
+                <span>
+                    <strong>Submit applications automatically</strong>
+                    <small>Off (recommended at first): the form is filled in, then it waits for your OK before the final Submit click.</small>
+                </span>
+            </label>
+            <label class="inline">
+                Skip jobs that match less than
+                <input type="number" name="minMatch" min="0" max="100" value="@Model.DefaultMinMatch" />
+                %
+                <small>0 = apply to everything.</small>
+            </label>
+        </div>
+
+        <div class="actions">
+            <button type="submit" id="start-jobs" class="btn primary" disabled>Start jobs</button>
+            <span class="muted small">Passwords are generated per site and saved to <code>@Model.AccountsDocumentPath</code> together with the e-mail
+                @(Model.HasEmail ? Model.ProfileEmail : "from your resume").</span>
+        </div>
+    </form>
+</section>
+
+<div id="live" data-poll-url="@Url.Action("Live", "Home")" data-poll-ms="2500">
+    @await Html.PartialAsync("_Live", Model.Live)
+</div>

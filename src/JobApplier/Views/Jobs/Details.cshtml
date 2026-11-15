@@ -1,0 +1,10 @@
+@model JobDetailsViewModel
+@{
+    ViewData["Title"] = Model.Company;
+}
+
+<p class="crumbs"><a asp-controller="Home" asp-action="Index">&larr; All jobs</a></p>
+
+<div id="job-body" data-poll-url="@Url.Action("Body", "Jobs", new { id = Model.Job.Id })" data-poll-ms="2000">
+    @await Html.PartialAsync("_JobBody", Model)
+</div>

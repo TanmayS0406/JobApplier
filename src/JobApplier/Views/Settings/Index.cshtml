@@ -1,0 +1,148 @@
+@model SettingsViewModel
+@{
+    ViewData["Title"] = "Settings";
+    var s = Model.Settings;
+}
+
+<section class="card">
+    <h2>Claude account @if (Model.Provider == "claude") { <span class="chip chip-good">in use</span> }</h2>
+    <p class="muted">
+        JobApplier uses your own Claude subscription through the official Claude Code CLI. It never sees your credentials:
+        <em>Sign in</em> opens Claude's own OAuth page in your browser and the CLI keeps the tokens.
+    </p>
+    <div id="claude-account" data-status-url="@Url.Action("ClaudeStatus", "Settings")"
+         data-signin-url="@Url.Action("SignIn", "Settings")" data-signout-url="@Url.Action("SignOut", "Settings")"
+         data-provider="Claude" data-install-hint="Claude Code CLI not found. Install it from https://claude.com/claude-code, or set its path below.">
+        <p id="claude-account-text" class="account-text">Checking...</p>
+        <div class="actions">
+            <button type="button" class="btn primary" id="claude-signin">Sign in with Claude</button>
+            <button type="button" class="btn" id="claude-signout">Sign out</button>
+        </div>
+    </div>
+</section>
+
+<section class="card">
+    <h2>Gemini account @if (Model.Provider == "gemini") { <span class="chip chip-good">in use</span> }</h2>
+    <p class="muted">
+        Run the jobs on Google's Gemini CLI instead. <em>Sign in</em> opens the CLI's own <em>Login with Google</em> in a console window and your
+        browser; JobApplier never sees the credentials. An API key also works: set <code>GEMINI_API_KEY</code> in your environment and restart the app.
+        Install the CLI first with <code>npm install -g @@google/gemini-cli</code>.
+    </p>
+    <div id="gemini-account" data-status-url="@Url.Action("GeminiStatus", "Settings")"
+         data-signin-url="@Url.Action("GeminiSignIn", "Settings")" data-signout-url="@Url.Action("GeminiSignOut", "Settings")"
+         data-provider="Gemini" data-install-hint="Gemini CLI not found. Install it with: npm install -g @@google/gemini-cli, or set its path below.">
+        <p id="gemini-account-text" class="account-text">Checking...</p>
+        <div class="actions">
+            <button type="button" class="btn primary" id="gemini-signin">Sign in with Google</button>
+            <button type="button" class="btn" id="gemini-signout">Sign out</button>
+        </div>
+    </div>
+</section>
+
+<section class="card">
+    <h2>Checks</h2>
+    <ul class="checks">
+        @foreach (var check in Model.Checks)
+        {
+            <li class="@(check.Ok ? "ok" : "bad")">
+                <span class="check-mark">@(check.Ok ? "OK" : "Missing")</span>
+                <strong>@check.Name</strong>
+                <span class="muted small">@check.Detail</span>
+            </li>
+        }
+    </ul>
+</section>
+
+<form asp-action="Save" method="post">
+    <section class="card">
+        <h2>Agent</h2>
+        <div class="form-grid">
+            <label class="wide">AI provider
+                <select name="Provider">
+                    <option value="claude" selected="@(Model.Provider == "claude")">Claude Code (your Claude subscription)</option>
+                    <option value="gemini" selected="@(Model.Provider == "gemini")">Gemini CLI (your Google account or a Gemini API key)</option>
+                </select>
+                <small>Applies to the next job. Both read the screenshot, search, score, fill the form and ask you for help the same way.
+                    With Gemini the result format is requested in the prompt rather than enforced by the CLI.</small>
+            </label>
+            <label>Claude model
+                <input name="Model" value="@s.Model" list="models" placeholder="empty = Claude Code default" />
+                <datalist id="models"><option value="sonnet"></option><option value="opus"></option><option value="haiku"></option><option value="fable"></option></datalist>
+            </label>
+            <label>Effort (Claude only)
+                <select name="Effort">
+                    @foreach (var level in new[] { "", "low", "medium", "high", "xhigh", "max" })
+                    {
+                        <option value="@level" selected="@(s.Effort == level)">@(level == "" ? "Model default" : level)</option>
+                    }
+                </select>
+            </label>
+            <label>Gemini model
+                <input name="GeminiModel" value="@s.GeminiModel" list="gemini-models" placeholder="empty = Gemini CLI default" />
+                <datalist id="gemini-models"><option value="gemini-2.5-pro"></option><option value="gemini-2.5-flash"></option></datalist>
+            </label>
+            <label>Jobs at the same time<input name="MaxParallelJobs" type="number" min="1" max="8" value="@s.MaxParallelJobs" /></label>
+            <label>Help timeout (minutes)<input name="HelpTimeoutMinutes" type="number" min="2" max="240" value="@s.HelpTimeoutMinutes" /></label>
+        </div>
+    </section>
+
+    <section class="card">
+        <h2>Browser</h2>
+        <div class="form-grid">
+            <label>Browser
+                <select name="Browser">
+                    @foreach (var b in new[] { "chrome", "msedge", "firefox", "webkit" })
+                    {
+                        <option value="@b" selected="@(s.Browser == b)">@b</option>
+                    }
+                </select>
+            </label>
+            <label>Playwright MCP version<input name="PlaywrightMcpVersion" value="@s.PlaywrightMcpVersion" /></label>
+            <label class="check wide">
+                <input type="checkbox" name="Headless" value="true" @(s.Headless ? "checked" : null) />
+                <span><strong>Hide the browser window (headless)</strong>
+                    <small>Not recommended: you cannot solve a CAPTCHA in a window you cannot see.</small></span>
+            </label>
+        </div>
+    </section>
+
+    <section class="card">
+        <h2>Defaults and files</h2>
+        <div class="form-grid">
+            <label class="check wide">
+                <input type="checkbox" name="DefaultAutoSubmit" value="true" @(s.DefaultAutoSubmit ? "checked" : null) />
+                <span><strong>Submit applications automatically by default</strong>
+                    <small>When off, every application waits for your approval before the final Submit.</small></span>
+            </label>
+            <label>Default minimum match %<input name="DefaultMinMatchPercent" type="number" min="0" max="100" value="@s.DefaultMinMatchPercent" /></label>
+            <label class="wide">Accounts document (.docx)
+                <input name="AccountsDocumentPath" value="@s.AccountsDocumentPath" placeholder="@Model.AccountsDocumentPath" />
+                <small>Empty = <code>JobApplier-Accounts.docx</code> on your Desktop.</small>
+            </label>
+            <label class="wide">Claude CLI path
+                <input name="ClaudePath" value="@s.ClaudePath" placeholder="empty = find claude.exe automatically" />
+            </label>
+            <label class="wide">Gemini CLI path
+                <input name="GeminiPath" value="@s.GeminiPath" placeholder="empty = find gemini.cmd automatically" />
+            </label>
+        </div>
+        <p class="muted small">Data folder: <code>@Model.DataFolder</code></p>
+    </section>
+
+    <div class="actions"><button class="btn primary" type="submit">Save settings</button></div>
+</form>
+
+<section class="card">
+    <h2>Accounts document</h2>
+    <p>
+        <code>@Model.AccountsDocumentPath</code> &middot; @Model.AccountCount account@(Model.AccountCount == 1 ? "" : "s") and
+        @Model.ApplicationCount application@(Model.ApplicationCount == 1 ? "" : "s") recorded.
+        It lists each account's company, role, site, e-mail and password in plain text - keep it private - and each posting
+        applied to with its URL. A new job for a posting listed there is skipped, so you never apply twice.
+    </p>
+    @if (!string.IsNullOrEmpty(Model.DocumentError))
+    {
+        <div class="banner banner-error">@Model.DocumentError</div>
+    }
+    <form asp-action="RebuildDocument" method="post"><button class="btn" type="submit">Rebuild document</button></form>
+</section>

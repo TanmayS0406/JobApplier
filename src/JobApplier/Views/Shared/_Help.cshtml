@@ -1,0 +1,39 @@
+@model HelpItem
+@{
+    var hint = Model.Request.Kind switch
+    {
+        HelpKind.Captcha => "A browser window is stopped at a CAPTCHA / bot check. Solve it in that window, then press the button.",
+        HelpKind.Verification => "The site needs something only you can do (e-mail code or link, 2FA, manual sign-in). Do it in the browser window, then press the button.",
+        HelpKind.Review => "The form is filled in. Look it over in the browser window, then choose what happens next.",
+        HelpKind.Question => "The form asks something your profile cannot answer. Your answer is remembered for future applications.",
+        HelpKind.Confirm => "The agent wants your go-ahead before continuing. This is not remembered.",
+        _ => "The agent needs you."
+    };
+}
+<p class="help-message">@Model.Request.Message</p>
+<p class="muted small">@hint</p>
+<form class="help-form" data-help-form method="post" action="@Url.Action("Help", "Jobs", new { id = Model.JobId })">
+    @Html.AntiForgeryToken()
+    <input type="hidden" name="requestId" value="@Model.Request.Id" />
+    @switch (Model.Request.Kind)
+    {
+        case HelpKind.Question:
+            <input type="text" name="text" class="grow" placeholder="Your answer" autocomplete="off" />
+            <button type="submit" name="action" value="answer" class="btn primary">Send answer</button>
+            <button type="submit" name="action" value="skip" class="btn ghost">Skip this job</button>
+            break;
+        case HelpKind.Confirm:
+            <button type="submit" name="action" value="yes" class="btn primary">Yes - go ahead</button>
+            <button type="submit" name="action" value="skip" class="btn ghost">No - skip this job</button>
+            break;
+        case HelpKind.Review:
+            <button type="submit" name="action" value="approve" class="btn primary">Looks good - submit it</button>
+            <button type="submit" name="action" value="submitted" class="btn">I submitted it myself</button>
+            <button type="submit" name="action" value="skip" class="btn ghost">Skip this job</button>
+            break;
+        default:
+            <button type="submit" name="action" value="done" class="btn primary">I've done it - continue</button>
+            <button type="submit" name="action" value="skip" class="btn ghost">Skip this job</button>
+            break;
+    }
+</form>

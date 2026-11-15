@@ -1,0 +1,52 @@
+@inject Microsoft.AspNetCore.Antiforgery.IAntiforgery Antiforgery
+@inject JobApplier.Services.SettingsService AppSettingsService
+@{
+    var useGemini = JobApplier.Domain.AiProvider.Normalize(AppSettingsService.Current.Provider) == JobApplier.Domain.AiProvider.Gemini;
+    var controller = (string?)ViewContext.RouteData.Values["controller"];
+    string Active(string name) => string.Equals(controller, name, StringComparison.OrdinalIgnoreCase) ? "active" : "";
+    var csrf = Antiforgery.GetAndStoreTokens(Context).RequestToken;
+}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="csrf" content="@csrf" />
+    <title>@ViewData["Title"] - JobApplier</title>
+    <link rel="stylesheet" href="~/css/site.css" asp-append-version="true" />
+</head>
+<body>
+    <header class="topbar">
+        <a class="brand" asp-controller="Home" asp-action="Index">JobApplier</a>
+        <nav>
+            <a class="@Active("Home")" asp-controller="Home" asp-action="Index">Dashboard</a>
+            <a class="@Active("Profile")" asp-controller="Profile" asp-action="Index">Profile</a>
+            <a class="@Active("Settings")" asp-controller="Settings" asp-action="Index">Settings</a>
+        </nav>
+        <a id="provider-pill" class="pill pill-unknown" asp-controller="Settings" asp-action="Index"
+           data-status-url="@Url.Action(useGemini ? "GeminiStatus" : "ClaudeStatus", "Settings")"
+           data-provider="@(useGemini ? "Gemini" : "Claude")">@(useGemini ? "Gemini" : "Claude"): checking...</a>
+    </header>
+
+    <main class="container">
+        @if (TempData["Message"] is string message)
+        {
+            <div class="banner banner-ok">@message</div>
+        }
+        @if (TempData["Error"] is string error)
+        {
+            <div class="banner banner-error">@error</div>
+        }
+        @RenderBody()
+    </main>
+
+    <div id="busy" class="busy" hidden>
+        <div class="busy-box">
+            <div class="spinner"></div>
+            <p id="busy-text">Working...</p>
+        </div>
+    </div>
+
+    <script src="~/js/site.js" asp-append-version="true"></script>
+</body>
+</html>

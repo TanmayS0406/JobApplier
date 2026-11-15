@@ -1,0 +1,10 @@
+bin/
+obj/
+.vs/
+*.user
+*.suo
+TestResults/
+.playwright-mcp/
+
+# run-time data written next to the project when JobApplier:DataFolder points here
+data/
