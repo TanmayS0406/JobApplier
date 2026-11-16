@@ -41,7 +41,19 @@ public class GmailController : Controller
         GmailConnectorStatus status;
         if (_checker.IsRunning && _reader.Cached is { } cached) status = cached;
         else if (_checker.IsRunning) status = GmailConnectorStatus.Of(ConnectorState.Unknown, "Looking through the mailbox now...");
-        else status = await _reader.GetStatusAsync(force, cancellationToken);
+        else
+        {
+            try
+            {
+                status = await _reader.GetStatusAsync(force, cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                // The page was reloaded or closed while Claude was being asked (a few seconds). Nobody is waiting for the answer, and
+                // letting the cancellation out of this action would show up as an unhandled exception (a Visual Studio break, a log entry).
+                return new EmptyResult();
+            }
+        }
 
         var state = _replies.State();
         Response.Headers.CacheControl = "no-store";
@@ -76,7 +88,15 @@ public class GmailController : Controller
     [HttpPost]
     public async Task<IActionResult> Enable(CancellationToken cancellationToken)
     {
-        var status = await _reader.GetStatusAsync(false, cancellationToken);
+        GmailConnectorStatus status;
+        try
+        {
+            status = await _reader.GetStatusAsync(false, cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            return new EmptyResult();   // the browser gave up; nothing was turned on
+        }
         if (!status.Ready) return Json(new { ok = false, message = status.Detail });
 
         _replies.SetEnabled(true);
@@ -133,7 +153,11 @@ public class GmailController : Controller
         {
             await _checker.CheckAsync(rescan: false, cancellationToken);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (OperationCanceledException)
+        {
+            // the app is shutting down
+        }
+        catch (Exception ex)
         {
             _logger.LogWarning(ex, "The first mail check failed.");
         }

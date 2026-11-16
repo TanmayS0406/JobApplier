@@ -248,7 +248,18 @@
         const stopWaiting = () => { if (waiting) { clearInterval(waiting); waiting = null; } };
 
         // force = ask a live Claude session about the connector again (a few seconds); otherwise a recent answer is used.
+        // Timers skip a round while a request is still running, so a slow Claude start never piles up probes behind each other.
+        let refreshBusy = false;
         async function refresh(force) {
+            refreshBusy = true;
+            try {
+                return await load(force);
+            } finally {
+                refreshBusy = false;
+            }
+        }
+
+        async function load(force) {
             try {
                 status = await (await fetch(`${account.dataset.statusUrl}?force=${force ? 'true' : 'false'}`, { cache: 'no-store' })).json();
             } catch { return null; }
@@ -310,6 +321,7 @@
             stopWaiting();
             let tries = 0;
             waiting = setInterval(async () => {
+                if (refreshBusy) return;
                 const s = await refresh(true);
                 if (s && s.state === 'ready') { stopWaiting(); msg.textContent = 'Gmail is connected. You can close the Claude window.'; }
                 else if (++tries >= 60) { stopWaiting(); msg.textContent = 'Still not connected. Finish the sign-in, then press Check connection.'; }
@@ -330,6 +342,7 @@
             if (!started.ok) return;   // Claude cannot use Gmail yet: nothing was turned on, the message says what is missing
             // The first check runs in the background; follow it until it is done.
             const timer = setInterval(async () => {
+                if (refreshBusy) return;
                 const s = await refresh(false);
                 if (s && !s.checking) { clearInterval(timer); $('gmail-msg').textContent = s.lastError ? 'The first check failed: ' + s.lastError : 'The first check is done.'; }
             }, 5000);
@@ -356,7 +369,7 @@
         });
 
         refresh(false);
-        setInterval(() => { if (!document.hidden && status && status.checking) refresh(false); }, 5000);
+        setInterval(() => { if (!document.hidden && !refreshBusy && status && status.checking) refresh(false); }, 5000);
     })();
 
     // ---------- Gmail: replies card on the dashboard (it is re-rendered by polling, so clicks are handled on the document) ----------

@@ -398,10 +398,13 @@ internal sealed class FakeReader : IMailReader
     public string? ConnectError { get; set; }
     public bool ConnectOpened { get; private set; }
 
-    public Task<GmailConnectorStatus> GetStatusAsync(bool force, CancellationToken cancellationToken)
+    public TaskCompletionSource? StatusGate { get; set; }
+
+    public async Task<GmailConnectorStatus> GetStatusAsync(bool force, CancellationToken cancellationToken)
     {
         StatusCalls++;
-        return Task.FromResult(Cached = Status);
+        if (StatusGate != null) await StatusGate.Task.WaitAsync(cancellationToken);   // a real probe honours cancellation the same way
+        return Cached = Status;
     }
 
     public async Task<IReadOnlyList<ScannedReply>> ScanAsync(MailScanRequest request, CancellationToken cancellationToken)
@@ -901,6 +904,25 @@ public class ClaudeMailReaderTests
     }
 
     [Fact]
+    public async Task Giving_up_on_a_probe_stops_it_at_once_and_leaves_the_reader_usable()
+    {
+        if (!FakeClaude.Available()) return;
+        var (reader, _, env) = Create(new { silent = true });   // Claude never says what it has
+        using var _e = env;
+        reader.ProbeTimeout = TimeSpan.FromSeconds(30);
+        using var abandoned = new CancellationTokenSource(TimeSpan.FromMilliseconds(500));
+
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => reader.GetStatusAsync(true, abandoned.Token));
+
+        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(10), "it must not wait for the probe timeout");
+
+        reader.ProbeTimeout = TimeSpan.FromSeconds(2);   // the next, patient caller is not blocked by the abandoned one
+        var next = await reader.GetStatusAsync(true, CancellationToken.None);
+        Assert.Equal(ConnectorState.Failed, next.State);
+    }
+
+    [Fact]
     public async Task A_missing_CLI_is_reported_without_starting_anything()
     {
         if (!OperatingSystem.IsWindows()) return;
@@ -1165,6 +1187,35 @@ public class GmailControllerTests
         Assert.Equal(0, reader.StatusCalls);   // even a forced status did not start a second Claude session
         reader.Gate.SetResult();
         Assert.True((await running).Ok);
+    }
+
+    [Fact]
+    public async Task A_status_request_the_browser_gave_up_on_ends_quietly_instead_of_throwing()
+    {
+        var (controller, reader, _, _, env) = Create();
+        using var _e = env;
+        reader.StatusGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var abandoned = new CancellationTokenSource();
+
+        var request = controller.Status(true, abandoned.Token);   // the page reloads while Claude is still being asked
+        abandoned.Cancel();
+
+        Assert.IsType<EmptyResult>(await request);
+    }
+
+    [Fact]
+    public async Task Starting_tracking_on_a_request_the_browser_gave_up_on_turns_nothing_on_and_does_not_throw()
+    {
+        var (controller, reader, store, _, env) = Create();
+        using var _e = env;
+        reader.StatusGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var abandoned = new CancellationTokenSource();
+
+        var request = controller.Enable(abandoned.Token);
+        abandoned.Cancel();
+
+        Assert.IsType<EmptyResult>(await request);
+        Assert.False(store.State().Enabled);
     }
 
     [Fact]
