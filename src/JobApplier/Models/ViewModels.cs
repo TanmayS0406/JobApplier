@@ -59,17 +59,19 @@ public sealed class LiveViewModel
     public IReadOnlyList<JobRow> Rows { get; init; } = Array.Empty<JobRow>();
     public IReadOnlyList<HelpItem> Help { get; init; } = Array.Empty<HelpItem>();
 
-    /// <summary>What the employer's mail says about each job (by job id), for the chip in the results table. Empty when Gmail is not used.</summary>
+    /// <summary>Reply tracking is on, so a job without a reply is "no reply yet" rather than unknown.</summary>
+    public bool RepliesTracked { get; init; }
+
+    /// <summary>What the employer's mail says about each job (by job id), for the Employer reply column of the results table. Empty when tracking is off.</summary>
     public IReadOnlyDictionary<Guid, EmployerReply> Replies { get; init; } = new Dictionary<Guid, EmployerReply>();
 }
 
 /// <summary>The "Replies from employers" card on the dashboard.</summary>
 public sealed class RepliesViewModel
 {
-    public bool HasClient { get; init; }
-    public bool Connected { get; init; }
-    public bool NeedsReconnect { get; init; }
-    public string Email { get; init; } = "";
+    /// <summary>Reply tracking is turned on (Settings). Nothing reads the mailbox before that.</summary>
+    public bool Enabled { get; init; }
+
     public bool Checking { get; init; }
     public int ApplicationCount { get; init; }
     public DateTime? LastCheckedUtc { get; init; }

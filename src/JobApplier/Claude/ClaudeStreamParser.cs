@@ -6,7 +6,9 @@ namespace JobApplier.Claude;
 /// <summary>One decoded line of <c>claude -p --output-format stream-json</c>.</summary>
 public abstract record ClaudeEvent;
 
-public sealed record InitEvent(string? SessionId, IReadOnlyList<(string Name, string Status)> McpServers) : ClaudeEvent;
+/// <param name="McpServers">Every MCP server the session knows, with its status (<c>connected</c>, <c>needs-auth</c>, <c>failed</c>, ...).</param>
+/// <param name="Tools">The names of the tools the session has loaded (<c>mcp__server__tool</c> for connector tools). Null when the CLI did not say.</param>
+public sealed record InitEvent(string? SessionId, IReadOnlyList<(string Name, string Status)> McpServers, IReadOnlyList<string>? Tools = null) : ClaudeEvent;
 
 public sealed record TextEvent(string Text) : ClaudeEvent;
 
@@ -44,7 +46,10 @@ public static class ClaudeStreamParser
                     foreach (var server in array.OfType<JsonObject>())
                         servers.Add(((string?)server["name"] ?? "", (string?)server["status"] ?? ""));
                 }
-                return new ClaudeEvent[] { new InitEvent((string?)message["session_id"], servers) };
+                var tools = message["tools"] is JsonArray toolArray
+                    ? toolArray.Select(t => (string?)t).OfType<string>().ToList()
+                    : null;
+                return new ClaudeEvent[] { new InitEvent((string?)message["session_id"], servers, tools) };
 
             case "assistant":
                 var events = new List<ClaudeEvent>();

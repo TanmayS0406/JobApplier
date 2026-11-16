@@ -17,6 +17,7 @@ public static class LiveViewModelBuilder
             Rows = rows,
             Help = help,
             PausedUntilUtc = pausedUntilUtc,
+            RepliesTracked = replies?.State().Enabled ?? false,
             Replies = replies?.StatusByJob() ?? new Dictionary<Guid, EmployerReply>()
         };
     }

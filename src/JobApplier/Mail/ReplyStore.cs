@@ -2,38 +2,33 @@ using JobApplier.Infrastructure;
 
 namespace JobApplier.Mail;
 
-/// <summary>When Gmail was last checked, and which messages have been looked at so they are not read again.</summary>
+/// <summary>Whether reply tracking is on, and how the last check went.</summary>
 public sealed class MailState
 {
-    /// <summary>The mailbox this state belongs to. A different account starts again.</summary>
-    public string Account { get; set; } = "";
+    /// <summary>The user asked for replies to be tracked. Nothing reads the mailbox, not even in the background, until this is on.</summary>
+    public bool Enabled { get; set; }
 
     public DateTime? LastCheckedUtc { get; set; }
     public DateTime? LastSuccessUtc { get; set; }
     public string LastError { get; set; } = "";
     public int LastNewReplies { get; set; }
 
-    /// <summary>Messages already examined (matched or not), oldest first.</summary>
-    public List<string> SeenIds { get; set; } = new();
-
-    /// <summary>Messages the user said are not about the application they were matched to. They are never matched again.</summary>
+    /// <summary>Messages the user said are not about the application they were matched to. They are never stored again.</summary>
     public List<string> DismissedIds { get; set; } = new();
 }
 
 /// <summary>
-/// The replies found so far (<c>replies.json</c>) and the checking state (<c>mail-state.json</c>). A reply keeps only the sender,
+/// The replies found so far (<c>replies.json</c>) and the tracking state (<c>mail-state.json</c>). A reply keeps only the sender,
 /// subject, a short snippet and the verdict - never the message itself.
 /// </summary>
 public sealed class ReplyStore
 {
-    private const int MaxSeen = 6000;
     private const int MaxDismissed = 1000;
 
     private readonly AppPaths _paths;
     private readonly object _gate = new();
     private readonly List<EmployerReply> _replies;
     private readonly MailState _state;
-    private readonly HashSet<string> _seen;
     private readonly HashSet<string> _dismissed;
 
     public ReplyStore(AppPaths paths)
@@ -41,7 +36,6 @@ public sealed class ReplyStore
         _paths = paths;
         _replies = JsonFile.Read<List<EmployerReply>>(paths.RepliesFile) ?? new List<EmployerReply>();
         _state = JsonFile.Read<MailState>(paths.MailStateFile) ?? new MailState();
-        _seen = new HashSet<string>(_state.SeenIds, StringComparer.Ordinal);
         _dismissed = new HashSet<string>(_state.DismissedIds, StringComparer.Ordinal);
     }
 
@@ -83,37 +77,34 @@ public sealed class ReplyStore
         {
             return new MailState
             {
-                Account = _state.Account,
+                Enabled = _state.Enabled,
                 LastCheckedUtc = _state.LastCheckedUtc,
                 LastSuccessUtc = _state.LastSuccessUtc,
                 LastError = _state.LastError,
-                LastNewReplies = _state.LastNewReplies
+                LastNewReplies = _state.LastNewReplies,
+                DismissedIds = _state.DismissedIds.ToList()
             };
         }
     }
 
-    public bool HasSeen(string messageId)
+    public void SetEnabled(bool enabled)
     {
-        lock (_gate) return _seen.Contains(messageId);
+        lock (_gate)
+        {
+            _state.Enabled = enabled;
+            SaveStateLocked();
+        }
+    }
+
+    /// <summary>The messages the user dismissed, to tell the reader not to report them again.</summary>
+    public IReadOnlyCollection<string> DismissedIds()
+    {
+        lock (_gate) return _state.DismissedIds.ToList();
     }
 
     public bool IsDismissed(string messageId)
     {
         lock (_gate) return _dismissed.Contains(messageId);
-    }
-
-    /// <summary>Starts again for a different mailbox: what was seen in the old one says nothing about the new one.</summary>
-    public void UseAccount(string email)
-    {
-        lock (_gate)
-        {
-            if (string.Equals(_state.Account, email, StringComparison.OrdinalIgnoreCase)) return;
-            _state.Account = email;
-            _seen.Clear();
-            _state.SeenIds.Clear();
-            _state.LastSuccessUtc = null;
-            SaveStateLocked();
-        }
     }
 
     /// <summary>Adds replies, or refreshes the ones already stored for the same message. Returns how many were new.</summary>
@@ -134,7 +125,7 @@ public sealed class ReplyStore
                     continue;
                 }
 
-                // A re-scan re-reads the message: keep the row, refresh what the rules decide.
+                // A re-scan reads the message again: keep the row, refresh what the reader decided.
                 existing.ApplicationId = reply.ApplicationId;
                 existing.JobId = reply.JobId;
                 existing.Company = reply.Company;
@@ -145,29 +136,6 @@ public sealed class ReplyStore
             }
             JsonFile.Write(_paths.RepliesFile, _replies);
             return added;
-        }
-    }
-
-    /// <summary>Notes that messages have been examined, whether or not they were replies.</summary>
-    public void MarkSeen(IEnumerable<string> messageIds)
-    {
-        lock (_gate)
-        {
-            foreach (var id in messageIds)
-                if (_seen.Add(id)) _state.SeenIds.Add(id);
-            SaveStateLocked();
-        }
-    }
-
-    /// <summary>Forgets what was seen, so the next check reads everything again (a re-scan).</summary>
-    public void ForgetSeen()
-    {
-        lock (_gate)
-        {
-            _seen.Clear();
-            _state.SeenIds.Clear();
-            _state.LastSuccessUtc = null;
-            SaveStateLocked();
         }
     }
 
@@ -201,15 +169,13 @@ public sealed class ReplyStore
         }
     }
 
-    /// <summary>Deletes every saved reply and everything remembered about the mailbox.</summary>
+    /// <summary>Deletes every saved reply and the record of past checks. Whether tracking is on is kept.</summary>
     public void Clear()
     {
         lock (_gate)
         {
             _replies.Clear();
-            _seen.Clear();
             _dismissed.Clear();
-            _state.SeenIds.Clear();
             _state.DismissedIds.Clear();
             _state.LastCheckedUtc = null;
             _state.LastSuccessUtc = null;
@@ -220,14 +186,5 @@ public sealed class ReplyStore
         }
     }
 
-    private void SaveStateLocked()
-    {
-        if (_state.SeenIds.Count > MaxSeen)
-        {
-            var drop = _state.SeenIds.Count - MaxSeen;
-            foreach (var id in _state.SeenIds.Take(drop)) _seen.Remove(id);
-            _state.SeenIds.RemoveRange(0, drop);
-        }
-        JsonFile.Write(_paths.MailStateFile, _state);
-    }
+    private void SaveStateLocked() => JsonFile.Write(_paths.MailStateFile, _state);
 }

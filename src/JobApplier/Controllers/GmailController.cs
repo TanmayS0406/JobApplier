@@ -5,85 +5,94 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace JobApplier.Controllers;
 
-/// <summary>Connecting Gmail (read-only OAuth) and the replies found in it. Every POST here is covered by the antiforgery filter.</summary>
+/// <summary>
+/// Reply tracking: Claude reads the user's Gmail through the Gmail connector of their Claude account. There is no Google sign-in in this
+/// app any more; connecting is done in Claude (claude.ai, or its /mcp screen). Every POST here is covered by the antiforgery filter.
+/// </summary>
 public class GmailController : Controller
 {
-    private readonly GmailConnection _gmail;
+    private readonly IMailReader _reader;
     private readonly MailChecker _checker;
     private readonly ReplyStore _replies;
     private readonly AccountService _accounts;
+    private readonly SettingsService _settings;
     private readonly IHostApplicationLifetime _lifetime;
     private readonly ILogger<GmailController> _logger;
 
-    public GmailController(GmailConnection gmail, MailChecker checker, ReplyStore replies, AccountService accounts,
+    public GmailController(IMailReader reader, MailChecker checker, ReplyStore replies, AccountService accounts, SettingsService settings,
                            IHostApplicationLifetime lifetime, ILogger<GmailController> logger)
     {
-        _gmail = gmail;
+        _reader = reader;
         _checker = checker;
         _replies = replies;
         _accounts = accounts;
+        _settings = settings;
         _lifetime = lifetime;
         _logger = logger;
     }
 
-    /// <summary>Everything the Settings card shows. Never contains the client secret or a token.</summary>
+    /// <summary>
+    /// Everything the Settings card shows. <paramref name="force"/> asks a live Claude session about the connector again (a few seconds);
+    /// otherwise a recent answer is reused, and while a check is running nothing new is started.
+    /// </summary>
     [HttpGet]
-    public IActionResult Status()
+    public async Task<IActionResult> Status(bool force, CancellationToken cancellationToken)
     {
-        var status = _gmail.GetStatus();
+        GmailConnectorStatus status;
+        if (_checker.IsRunning && _reader.Cached is { } cached) status = cached;
+        else if (_checker.IsRunning) status = GmailConnectorStatus.Of(ConnectorState.Unknown, "Looking through the mailbox now...");
+        else status = await _reader.GetStatusAsync(force, cancellationToken);
+
         var state = _replies.State();
         Response.Headers.CacheControl = "no-store";
         return Json(new
         {
-            hasClient = status.HasClient,
-            clientHint = status.ClientHint,
-            connected = status.Connected,
-            needsReconnect = status.NeedsReconnect,
-            email = status.Email,
-            connectedUtc = status.ConnectedUtc,
+            state = status.State.ToString().ToLowerInvariant(),
+            ready = status.Ready,
+            detail = status.Detail,
+            readTools = status.ReadTools.Select(t => t[(t.LastIndexOf("__", StringComparison.Ordinal) + 2)..]).ToList(),
+            enabled = state.Enabled,
+            checking = _checker.IsRunning,
             lastCheckedUtc = state.LastCheckedUtc,
             lastError = state.LastError,
-            checking = _checker.IsRunning,
             replyCount = _replies.Count,
-            redirectUri = RedirectUri()
+            autoHours = _settings.Current.MailAutoCheckHours,
+            model = _settings.Current.MailModel
         });
     }
 
-    /// <summary>Saves the Client ID and secret of the Google client the user created. An empty secret keeps the saved one.</summary>
-    [HttpPost]
-    public IActionResult SaveClient([FromForm] string? clientId, [FromForm] string? clientSecret)
-    {
-        var error = _gmail.SaveClient(clientId, clientSecret);
-        return Json(new { ok = error == null, message = error ?? "Client saved. Now press Connect Gmail." });
-    }
-
-    /// <summary>
-    /// Returns the address of Google's consent page. The page then goes there with <c>location.assign</c>: the Content-Security-Policy
-    /// <c>form-action 'self'</c> would also block a redirect to Google after a form post.
-    /// </summary>
+    /// <summary>Opens Claude's own connector screen (<c>/mcp</c>) in a console window, where the Gmail connector is signed in to Google.</summary>
     [HttpPost]
     public IActionResult Connect()
     {
-        if (!IsLoopback(Request.Host.Host))
-            return Json(new { ok = false, error = "Open JobApplier as http://127.0.0.1:" + (Request.Host.Port ?? 5189) + " to connect Gmail: Google only returns to this PC's own address." });
-
-        var url = _gmail.StartConnect(RedirectUri(), out var error);
-        return Json(new { ok = url != null, url, error });
+        var error = _reader.OpenConnectWindow();
+        return Json(new { ok = error == null, error });
     }
 
-    /// <summary>Where Google sends the browser back to after the consent page. The <c>state</c> proves this app started the sign-in.</summary>
-    [HttpGet]
-    public async Task<IActionResult> Callback(string? state, string? code, string? error, CancellationToken cancellationToken)
+    /// <summary>
+    /// Turns reply tracking on and starts the first check in the background - but only when Claude can actually use the Gmail connector
+    /// right now; otherwise nothing is turned on and the answer says what is missing.
+    /// </summary>
+    [HttpPost]
+    public async Task<IActionResult> Enable(CancellationToken cancellationToken)
     {
-        var (ok, message) = await _gmail.CompleteAsync(state, code, error, cancellationToken);
-        TempData[ok ? "Message" : "Error"] = message;
+        var status = await _reader.GetStatusAsync(false, cancellationToken);
+        if (!status.Ready) return Json(new { ok = false, message = status.Detail });
 
-        // Do not make the user wait for the first look at the mailbox: start it now and let the dashboard show what it finds.
-        if (ok) _ = Task.Run(() => CheckInBackgroundAsync(_lifetime.ApplicationStopping));
-        return RedirectToAction("Index", "Settings");
+        _replies.SetEnabled(true);
+        _ = Task.Run(() => CheckInBackgroundAsync(_lifetime.ApplicationStopping));
+        return Json(new { ok = true, message = "Reply tracking is on. The first check is running; it can take a minute or two." });
     }
 
-    /// <summary>Looks through the mailbox now. <paramref name="rescan"/> reads old messages again, too.</summary>
+    /// <summary>Turns reply tracking off. The replies already found are kept.</summary>
+    [HttpPost]
+    public IActionResult Disable()
+    {
+        _replies.SetEnabled(false);
+        return Json(new { ok = true, message = "Reply tracking is off. Nothing reads your mailbox any more; the replies already found are kept." });
+    }
+
+    /// <summary>Looks through the mailbox now. <paramref name="rescan"/> looks back to the first application again.</summary>
     [HttpPost]
     public async Task<IActionResult> Check([FromForm] bool rescan, CancellationToken cancellationToken)
     {
@@ -94,42 +103,11 @@ public class GmailController : Controller
         }
         catch (OperationCanceledException)
         {
-            return Json(new { ok = false, message = "The check was cancelled; what was read so far is kept." });
+            return Json(new { ok = false, message = "The check was cancelled." });
         }
     }
 
-    /// <summary>Tells Google to forget the connection and deletes the stored sign-in. The saved client is kept.</summary>
-    [HttpPost]
-    public async Task<IActionResult> Disconnect(CancellationToken cancellationToken)
-    {
-        try
-        {
-            await _gmail.DisconnectAsync(cancellationToken);
-            return Json(new { ok = true, message = "Gmail was disconnected. The replies already found are kept." });
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
-        {
-            return Json(new { ok = false, message = "Could not disconnect: " + ex.Message });
-        }
-    }
-
-    /// <summary>Disconnects and also forgets the Client ID and secret.</summary>
-    [HttpPost]
-    public async Task<IActionResult> RemoveClient(CancellationToken cancellationToken)
-    {
-        try
-        {
-            await _gmail.DisconnectAsync(cancellationToken);
-            _gmail.RemoveEverything();
-            return Json(new { ok = true, message = "Gmail was disconnected and the saved client was deleted." });
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
-        {
-            return Json(new { ok = false, message = "Could not remove it: " + ex.Message });
-        }
-    }
-
-    /// <summary>Deletes the saved replies and what was remembered about the mailbox (the mailbox itself is never touched).</summary>
+    /// <summary>Deletes the saved replies and the record of past checks (the mailbox itself is never touched).</summary>
     [HttpPost]
     public IActionResult ClearReplies()
     {
@@ -146,7 +124,7 @@ public class GmailController : Controller
     public IActionResult Replies()
     {
         Response.Headers.CacheControl = "no-store";
-        return PartialView("_Replies", RepliesViewModelBuilder.Build(_gmail, _replies, _checker, _accounts));
+        return PartialView("_Replies", RepliesViewModelBuilder.Build(_replies, _checker, _accounts));
     }
 
     private async Task CheckInBackgroundAsync(CancellationToken cancellationToken)
@@ -157,11 +135,7 @@ public class GmailController : Controller
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            _logger.LogWarning(ex, "The first mail check after connecting failed.");
+            _logger.LogWarning(ex, "The first mail check failed.");
         }
     }
-
-    private string RedirectUri() => $"{Request.Scheme}://{Request.Host}{Url.Action(nameof(Callback), "Gmail")}";
-
-    private static bool IsLoopback(string host) => host is "127.0.0.1" or "localhost" or "[::1]" or "::1";
 }

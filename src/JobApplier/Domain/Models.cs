@@ -405,4 +405,10 @@ public sealed class AppSettings
 
     /// <summary>How long one job may wait for the user (captcha, question, review) before it gives up.</summary>
     public int HelpTimeoutMinutes { get; set; } = 45;
+
+    /// <summary>Model that reads the mailbox for employer replies. A small one is plenty and keeps the usage cost low. Empty = Claude Code's default.</summary>
+    public string MailModel { get; set; } = "haiku";
+
+    /// <summary>How often, in hours, the mailbox is checked by itself once reply tracking is on. 0 = only when asked.</summary>
+    public int MailAutoCheckHours { get; set; } = 6;
 }

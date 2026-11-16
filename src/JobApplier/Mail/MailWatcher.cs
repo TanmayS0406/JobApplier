@@ -1,19 +1,28 @@
+using JobApplier.Services;
+
 namespace JobApplier.Mail;
 
-/// <summary>Checks the mailbox for replies now and then while the app is running, as long as Gmail is connected.</summary>
+/// <summary>
+/// Checks the mailbox for replies now and then while the app runs - but only once the user has turned reply tracking on, only as often
+/// as the settings say (each check uses some of the user's Claude usage), and never while the Claude usage limit is holding jobs back.
+/// </summary>
 public sealed class MailWatcher : BackgroundService
 {
-    private static readonly TimeSpan FirstDelay = TimeSpan.FromSeconds(45);
-    private static readonly TimeSpan Interval = TimeSpan.FromMinutes(30);
+    private static readonly TimeSpan FirstDelay = TimeSpan.FromSeconds(90);
+    private static readonly TimeSpan Tick = TimeSpan.FromMinutes(10);
 
     private readonly MailChecker _checker;
-    private readonly IMailAccess _access;
+    private readonly ReplyStore _store;
+    private readonly SettingsService _settings;
+    private readonly JobRunner _runner;
     private readonly ILogger<MailWatcher> _logger;
 
-    public MailWatcher(MailChecker checker, IMailAccess access, ILogger<MailWatcher> logger)
+    public MailWatcher(MailChecker checker, ReplyStore store, SettingsService settings, JobRunner runner, ILogger<MailWatcher> logger)
     {
         _checker = checker;
-        _access = access;
+        _store = store;
+        _settings = settings;
+        _runner = runner;
         _logger = logger;
     }
 
@@ -22,10 +31,10 @@ public sealed class MailWatcher : BackgroundService
         try
         {
             await Task.Delay(FirstDelay, stoppingToken);
-            using var timer = new PeriodicTimer(Interval);
+            using var timer = new PeriodicTimer(Tick);
             do
             {
-                await CheckOnceAsync(stoppingToken);
+                await CheckIfDueAsync(stoppingToken);
             }
             while (await timer.WaitForNextTickAsync(stoppingToken));
         }
@@ -35,11 +44,19 @@ public sealed class MailWatcher : BackgroundService
         }
     }
 
-    private async Task CheckOnceAsync(CancellationToken cancellationToken)
+    /// <summary>True when tracking is on, automatic checks are not switched off, the last check is old enough and Claude is not out of usage.</summary>
+    internal static bool IsDue(MailState state, int everyHours, DateTime nowUtc, DateTime? pausedUntilUtc) =>
+        state.Enabled
+        && everyHours > 0
+        && !(pausedUntilUtc is { } until && until > nowUtc)
+        && (state.LastCheckedUtc is not { } last || nowUtc - last >= TimeSpan.FromHours(everyHours));
+
+    private async Task CheckIfDueAsync(CancellationToken cancellationToken)
     {
         try
         {
-            if (_access.Connected) await _checker.CheckAsync(rescan: false, cancellationToken);
+            if (!IsDue(_store.State(), _settings.Current.MailAutoCheckHours, DateTime.UtcNow, _runner.PausedUntilUtc)) return;
+            await _checker.CheckAsync(rescan: false, cancellationToken);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {

@@ -75,70 +75,65 @@
 <section class="card" id="gmail">
     <h2>Gmail replies <span id="gmail-chip" class="chip" hidden></span></h2>
     <p class="muted">
-        Connect your Gmail so JobApplier can tell you which employers answered your applications: <em>received</em>, <em>interview / next step</em>,
-        <em>more information needed</em>, <em>rejected</em> or <em>offer</em>. Access is <strong>read-only</strong> (JobApplier cannot send, delete or change anything),
-        the mail is read on this PC only, and none of it is sent to Claude or Gemini. Only the sender, subject and a short snippet of the replies it finds are kept.
+        Find out which employers answered your applications - <em>received</em>, <em>interview / next step</em>, <em>more information needed</em>,
+        <em>rejected</em> or <em>offer</em> - on the dashboard. There is no Google sign-in in this app: Claude reads your Gmail through the
+        <strong>Gmail connector of your Claude account</strong>, using read-only search and read tools only (it cannot send, draft, label or delete anything).
     </p>
-    <div id="gmail-account" data-status-url="@Url.Action("Status", "Gmail")" data-saveclient-url="@Url.Action("SaveClient", "Gmail")"
-         data-connect-url="@Url.Action("Connect", "Gmail")" data-check-url="@Url.Action("Check", "Gmail")"
-         data-disconnect-url="@Url.Action("Disconnect", "Gmail")" data-removeclient-url="@Url.Action("RemoveClient", "Gmail")"
-         data-clear-url="@Url.Action("ClearReplies", "Gmail")">
+    <p class="muted small">
+        <strong>Privacy:</strong> the text of the mails Claude opens is processed by Claude (Anthropic) under your Claude account, like anything else you ask Claude
+        about your mail; it is not sent anywhere else. JobApplier keeps only the sender, subject, a short snippet and the verdict of each reply. Each check uses a
+        little of your Claude usage (the model is set in the form below, Haiku by default).
+    </p>
+    <div id="gmail-account" data-status-url="@Url.Action("Status", "Gmail")" data-connect-url="@Url.Action("Connect", "Gmail")"
+         data-enable-url="@Url.Action("Enable", "Gmail")" data-disable-url="@Url.Action("Disable", "Gmail")"
+         data-check-url="@Url.Action("Check", "Gmail")" data-clear-url="@Url.Action("ClearReplies", "Gmail")">
         <p id="gmail-text" class="account-text">Checking...</p>
 
-        <div class="step" id="gmail-setup">
-            <strong>Step 1 - a Google client of your own (once, about 3 minutes)</strong>
+        <div class="step">
+            <strong>Step 1 - connect Gmail to your Claude account</strong>
             <p class="muted small">
-                Google must know which app is asking for your mail. You create that "app" yourself, so only you can ever use it to reach your mailbox.
+                Claude must be signed in (the Claude card above). Gmail is added and signed in to Google in Claude, not here:
             </p>
             <ol class="small steps-list">
-                <li>Open the <a href="https://console.cloud.google.com/projectcreate" target="_blank" rel="noopener noreferrer">Google Cloud Console</a> and create a project (any name).</li>
-                <li>Open <a href="https://console.cloud.google.com/apis/library/gmail.googleapis.com" target="_blank" rel="noopener noreferrer">Gmail API</a> and press <em>Enable</em>.</li>
+                <li>Press <em>Open Claude to connect Gmail</em>. A Claude window opens on its connector screen (if it does not, type <kbd>/mcp</kbd> in it).</li>
+                <li>Choose <em>claude.ai Gmail</em>, then <em>Authenticate</em>, and allow access in the browser tab that opens.</li>
                 <li>
-                    Open the <a href="https://console.cloud.google.com/auth/overview" target="_blank" rel="noopener noreferrer">Google Auth Platform</a> and set it up:
-                    audience <em>External</em>, an app name and your e-mail. Under <em>Audience &rarr; Test users</em> add <strong>your own Gmail address</strong>.
-                </li>
-                <li>
-                    Under <em>Clients</em> (or <em>APIs &amp; Services &rarr; Credentials</em>) create an <em>OAuth client ID</em> of type <strong>Desktop app</strong>.
-                    Copy the <em>Client ID</em> and the <em>Client secret</em> into the boxes below.
+                    Or do it on the web: <a href="https://claude.ai/settings/connectors" target="_blank" rel="noopener noreferrer">claude.ai &rarr; Settings &rarr; Connectors</a>,
+                    add <em>Gmail</em> and press <em>Connect</em>. Then press <em>Check connection</em> here.
                 </li>
             </ol>
-            <p class="muted small">
-                Chose <em>Web application</em> instead? Add <code>@($"{Context.Request.Scheme}://{Context.Request.Host}/Gmail/Callback")</code> as an authorised redirect URI.
-            </p>
             <div class="actions">
-                <input id="gmail-client-id" type="text" class="grow" autocomplete="off" spellcheck="false" placeholder="Client ID (…apps.googleusercontent.com)" />
-                <input id="gmail-client-secret" type="password" class="grow" autocomplete="off" spellcheck="false" placeholder="Client secret" />
-                <button type="button" class="btn primary" id="gmail-save">Save client</button>
+                <button type="button" class="btn primary" id="gmail-connect">Open Claude to connect Gmail</button>
+                <button type="button" class="btn" id="gmail-verify">Check connection</button>
             </div>
-            <p id="gmail-client-msg" class="muted small"></p>
+            <p id="gmail-connect-msg" class="muted small"></p>
         </div>
 
         <div class="step">
-            <strong>Step 2 - connect</strong>
+            <strong>Step 2 - track replies</strong>
             <p class="muted small">
-                Google's page asks to <em>view your email messages and settings</em> (read-only). Because the app is your own and not verified by Google, it first says
-                <em>"Google hasn't verified this app"</em>: press <em>Advanced</em>, then <em>Go to ... (unsafe)</em>. That is expected here.
-                While the consent screen is in <em>Testing</em>, Google ends the sign-in after 7 days; this page then tells you, and one click on Connect fixes it.
+                Starting tracking has Claude look through your mailbox once, and then again by itself as often as set below (0 = only when you press the button).
+                Nothing reads your mailbox until you start it.
             </p>
             <div class="actions">
-                <button type="button" class="btn primary" id="gmail-connect">Connect Gmail</button>
+                <button type="button" class="btn primary" id="gmail-enable">Start tracking replies</button>
                 <button type="button" class="btn" id="gmail-check">Check for replies now</button>
-                <button type="button" class="btn ghost" id="gmail-disconnect">Disconnect</button>
+                <button type="button" class="btn ghost" id="gmail-disable">Stop tracking</button>
             </div>
             <p id="gmail-msg" class="muted small"></p>
+            <p class="small"><a asp-controller="Home" asp-action="Index" asp-fragment="replies">See the replies next to your applications on the Dashboard &rarr;</a></p>
         </div>
 
         <details class="small gmail-more">
             <summary>More</summary>
             <p class="muted">
-                The Client ID, secret and sign-in are stored encrypted with Windows (DPAPI) for your user in <code>gmail.dat</code>, so the file is useless on another PC or account.
-                The replies found are in <code>replies.json</code> in the data folder. Replies are recognised by phrase rules in English and Spanish, not by an AI: a reply that cannot be
-                recognised is shown as <em>Reply</em> and a wrong match can be removed with <em>Not about this job</em>.
+                Claude decides which application a mail answers and what it says, so it can be wrong; a doubtful one is shown with a <em>check</em> tag and a wrong match can be removed with
+                <em>Not about this job</em>. The replies found are in <code>replies.json</code> in the data folder. If the connection check says the connector needs authentication
+                even though Claude lists it as connected, finish signing in to Google as in step 1.
             </p>
             <div class="actions">
-                <button type="button" class="btn" id="gmail-rescan" title="Read the whole mailbox period again, for example after a wrong match was fixed.">Read old mail again</button>
+                <button type="button" class="btn" id="gmail-rescan" title="Look back to the first application again, for example after a missed check.">Read old mail again</button>
                 <button type="button" class="btn ghost" id="gmail-clear">Delete saved replies</button>
-                <button type="button" class="btn ghost" id="gmail-remove">Disconnect and forget the client</button>
             </div>
         </details>
     </div>
@@ -188,6 +183,21 @@
             </label>
             <label>Jobs at the same time<input name="MaxParallelJobs" type="number" min="1" max="8" value="@s.MaxParallelJobs" /></label>
             <label>Help timeout (minutes)<input name="HelpTimeoutMinutes" type="number" min="2" max="240" value="@s.HelpTimeoutMinutes" /></label>
+        </div>
+    </section>
+
+    <section class="card">
+        <h2>Reply tracking</h2>
+        <div class="form-grid">
+            <label>Model that reads the mailbox
+                <input name="MailModel" value="@s.MailModel" list="mail-models" placeholder="empty = Claude Code default" />
+                <datalist id="mail-models"><option value="haiku"></option><option value="sonnet"></option></datalist>
+                <small>A small model is enough for this and uses the least of your Claude usage. It always runs on Claude, whichever AI provider runs the jobs.</small>
+            </label>
+            <label>Check by itself every (hours)
+                <input name="MailAutoCheckHours" type="number" min="0" max="72" value="@s.MailAutoCheckHours" />
+                <small>0 = only when you press <em>Check for replies now</em>. Applies once tracking has been started above.</small>
+            </label>
         </div>
     </section>
 

@@ -194,39 +194,40 @@ It is rebuilt from `accounts.json` and `applications.json` on every change, so i
 
 ## Gmail replies
 
-Connect your Gmail (*Settings -> Gmail replies*) and the dashboard shows **which employers answered** each application, and what they
-said: **received**, **moving forward** (interview, call, assessment, next steps), **info requested**, **rejected** or **offer**. Each
-job row gets a chip with its latest answer, and the *Replies from employers* card lists the mails with a link that opens each in Gmail.
-The mailbox is checked every 30 minutes while the app runs, or when you press *Check now*.
+Turn on reply tracking (the **Start tracking replies** button on the dashboard, or *Settings -> Gmail replies*) and the dashboard shows
+**which employers answered** each application, and what they said: **received**, **moving forward** (interview, call, assessment, next steps), **info requested**, **rejected** or **offer**.
+The results table has an **Employer reply** column: each application shows its latest answer (with the subject and how long ago), or
+*no reply yet*; the *Replies from employers* card above it lists the mails with a link that opens each in Gmail. It works in English and Spanish.
 
-**One-time setup (about 3 minutes).** Google needs to know which app is asking for your mail, and the app is yours, so you create it:
+**There is no Google sign-in and no Google Cloud project.** Claude reads your Gmail through the **Gmail connector of your Claude
+account**, the same one you can use in Claude itself. To set it up:
 
-1. In the [Google Cloud Console](https://console.cloud.google.com/projectcreate) create a project (any name).
-2. Enable the [Gmail API](https://console.cloud.google.com/apis/library/gmail.googleapis.com).
-3. In the [Google Auth Platform](https://console.cloud.google.com/auth/overview) choose audience *External*, give it a name, and add
-   **your own Gmail address** under *Test users*.
-4. Create an *OAuth client ID* of type **Desktop app** and paste its Client ID and Client secret into Settings, then press
-   *Connect Gmail*. (With a *Web application* client, add the redirect URI that Settings shows.)
+1. Be signed in to Claude (the Claude card in Settings).
+2. Connect Gmail to your Claude account: press *Open Claude to connect Gmail* (a Claude window opens on its `/mcp` screen: choose
+   *claude.ai Gmail*, then *Authenticate*), or add *Gmail* at claude.ai -> Settings -> Connectors. Then press *Check connection*.
+3. Press *Start tracking replies* (on the dashboard or here). It first checks that Claude can really use Gmail and, if not, says what is
+   missing instead of turning anything on.
 
-Google shows *"Google hasn't verified this app"* because the app is your own: press *Advanced*, then *Go to ... (unsafe)*.
-**While the consent screen is in *Testing*, Google ends the sign-in after 7 days**; the dashboard and Settings then say so and one
-click on *Connect Gmail* fixes it.
+Nothing reads your mailbox until you press *Start tracking replies*. After that it is checked by itself every few hours (6 by default,
+0 = only when you press *Check for replies now*; set in Settings), and never while the Claude usage limit is holding jobs back.
 
-How it stays safe and private:
+How it works, and what to know:
 
-* **Read-only**: only the `gmail.readonly` scope is requested, so the app cannot send, delete or change anything. Sign-in uses
-  OAuth 2.0 with PKCE and a single-use `state`; the return address is this app's own `127.0.0.1` page.
-* **Nothing leaves this PC except calls to Google.** Mail is read and classified locally by phrase rules (English and Spanish), not by
-  an AI, so no mail text goes to Claude or Gemini. Most mail is dismissed from its sender, subject and date alone; only a message that
-  could be an answer is opened in full. Only the sender, subject, a short snippet and the verdict are saved (`replies.json`).
-* Your Client ID, secret and sign-in are stored **encrypted with Windows DPAPI** for your Windows user (`gmail.dat`), so the file is
-  useless on another PC or account. *Disconnect* tells Google to revoke the grant and deletes it.
-
-Limits to know about: the classification is heuristic. A rejection that also invites you to something is shown with a *check* tag; a mail
-that could not be recognised is shown as *Reply*; and a mail from a recruiting system that does not name the company cannot be matched.
-*Not about this job* removes a wrong match for good, and *Read old mail again* (Settings -> More) re-reads the mailbox after a
-fix. Replies are matched to applications by company name in the sender, subject or (for recruiting-looking mail) the text, plus the
-role - so applying to several roles at one company is handled by the role words.
+* **The connector status comes from a live Claude session**, not from `claude mcp list`, which can report a connector as "Connected"
+  that a real session cannot use (it is then `needs-auth`). The app starts Claude just long enough to read which connectors it has,
+  then stops it.
+* **Read-only, enforced by name.** A scan runs Claude with *only* the connector's tools that search and read mail
+  (`GmailToolPolicy`), no file, shell or web tools, and a permission mode that refuses everything else. Any Gmail tool that could send,
+  draft, label, move or delete is refused explicitly. Mail text is treated as data: the prompt tells Claude never to follow
+  instructions found in a message, and even a message that tried would have nothing to act with.
+* **Your mail is processed by Claude (Anthropic)**, under your Claude account, like anything else you ask Claude about your mail. It is
+  not sent anywhere else, and no other AI sees it (the Gemini provider is not involved). JobApplier keeps only the sender, subject, a
+  short snippet and the verdict of each reply (`replies.json`), never the messages.
+* **It uses some of your Claude usage.** A small model reads the mailbox (Haiku by default, changeable in Settings) and only the last
+  few days are looked at after the first check.
+* **Claude decides which application a mail answers and what it says**, so it can be wrong. What it reports is checked before it is
+  stored (it must name one of the applications asked about, have a message id and not predate the application). A doubtful reply
+  carries a *check* tag, and *Not about this job* removes a wrong match for good.
 
 ## Settings
 
@@ -240,6 +241,7 @@ role - so applying to several roles at one company is handled by the role words.
 | Playwright MCP version | pinned (`0.0.85`) so a new release cannot change behaviour under you. |
 | Defaults | auto-submit and minimum match % pre-filled on the dashboard. |
 | Help timeout | how long a job waits for you before giving up. |
+| Mail model / Check every | the model that reads the mailbox for replies (default `haiku`) and how often, in hours, it is checked once tracking is on (default 6, 0 = only when asked). |
 | Accounts document / Claude CLI path / Gemini CLI path | override the defaults. |
 
 ## Where things are stored
@@ -248,8 +250,8 @@ role - so applying to several roles at one company is handled by the role words.
 
 ```
 settings.json  profile.json  accounts.json  applications.json
-gmail.dat                    Gmail client + sign-in, encrypted with Windows DPAPI (only if you connect Gmail)
-replies.json  mail-state.json   employer replies found in Gmail, and which messages were already looked at
+replies.json  mail-state.json   employer replies found in Gmail, and whether tracking is on and when it last ran
+mail-workspace/              an empty folder the mailbox reader runs in
 resume/                      your resume copy
 jobs/<id>/job.json           the job: results, log (passwords never included)
 jobs/<id>/screenshot.*       the uploaded image
@@ -269,13 +271,14 @@ jobs/<id>/private/           MCP config + secrets file - outside the workspace, 
 * **Your resume and profile are sent to the AI provider you selected (Anthropic for Claude, Google for Gemini)** because the agent
   needs them to fill forms and score fit. Nothing is sent anywhere else.
 * The job log shows what the agent *did* ("typed into *Password field*"), never what it typed.
-* Gmail (optional) is read-only and read on this PC only - see *Gmail replies* above. The mail checker never talks to the AI agent,
-  and the Gmail client secret and tokens are never logged or sent back to the page.
+* Gmail (optional) is read by Claude through your Claude account's Gmail connector, with read-only tools only - see *Gmail replies*
+  above. This app holds no Google credential. The mail text is processed by Claude (Anthropic), is never logged, and only a short
+  snippet and the verdict of each reply are kept on this PC.
 
 ## Things to know
 
-* **E-mail verification:** the agent cannot read your inbox (the optional Gmail connection is only for showing you replies, and is
-  not available to the agent). When a site sends a code or link it asks you to do it in the browser window, then continues.
+* **E-mail verification:** the job agent cannot read your inbox (the optional reply tracking is a separate, read-only Claude run that
+  only reports replies, and is not available to the job agent). When a site sends a code or link it asks you to do it in the browser window, then continues.
 * **Not every site works.** Standard forms on Greenhouse, Lever, Ashby, SmartRecruiters and many company sites do; heavily
   customised portals, "Easy Apply inside LinkedIn", or sites that block automation may need your help or fail. A failed job keeps its
   log, so you can see how far it got.
@@ -291,8 +294,8 @@ src/JobApplier/
   Agents/     Prompts, AgentFactory, JobWorkflow (the four stages as Agent Framework executors)
   Claude/     CliAgent (the shared AIAgent base), ClaudeCodeAgent + ClaudeCli, GeminiCliAgent + GeminiCli + GeminiStream
               (decoder, settings file), tool-activity log lines
-  Mail/       Gmail: GoogleOAuthClient (OAuth + PKCE), GmailConnection (DPAPI vault), GmailApi (read-only REST), ReplyMatcher +
-              ReplyClassifier (which application, what it says), MailChecker + MailWatcher, ReplyStore
+  Mail/       Gmail replies: ClaudeMailReader (connector probe + read-only scan), GmailToolPolicy, MailScanPrompt, MailChecker +
+              MailWatcher, ReplyStore
   Mcp/        JobMcpServer - wait_for_user, record_account, report_progress
   Services/   JobRunner (queue, usage-limit hold + auto-retry), JobStore, HumanHelpBroker, AccountService + AccountsDocument (.docx),
               ProfileService/Importer, Claude/GeminiAccountService, ...
@@ -308,13 +311,12 @@ dotnet test
 
 The unit tests cover password generation and redaction, the stream parser, the MCP protocol, the help broker, the Word document
 writer, account reuse, the duplicate guard, the JSON schemas the CLI accepts, and how the Agent Framework routes messages
-between stages. The Gmail part is covered against a fake Google (OAuth/PKCE, the encrypted vault, token refresh and expiry, Gmail
-parsing, matching mail to applications, classifying wording such as "if you are selected..." versus a real invitation, and the
-checker end to end).
+between stages. The Gmail part is covered against a fake `claude` CLI (a script that answers from a scenario file and records how it was
+called): the connector probe, the read-only tool restriction and the exact arguments of a scan, a connector that needs sign-in or
+drops out, usage limits, timeouts, and what is accepted from Claude's answer.
 
-The Gmail pages were also driven in a real browser (Settings card, the redirect to Google's consent page under the CSP, a forged
-callback, the replies card). What has **not** been tested is a live sign-in against a real Google account, because that needs your
-own Google client.
+The Gmail pages were also driven in a real browser (Settings card, the replies card). What has **not** been tested is a live read of a
+real mailbox, because that needs your Gmail connector to be signed in in your Claude account.
 
 The whole pipeline was also checked live against the real Claude CLI, a real browser and a local fake company portal (CAPTCHA
 wall, sign-up with a password policy, file upload, a question the profile could not answer, a review gate): three jobs in

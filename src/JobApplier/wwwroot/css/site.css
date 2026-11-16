@@ -230,7 +230,6 @@ li.bad .check-mark { background: color-mix(in srgb, var(--low) 20%, var(--panel)
 /* ---- Gmail replies ---- */
 #gmail-account .step { border: 1px solid var(--line); border-radius: 8px; padding: .8rem 1rem; margin: .8rem 0; }
 #gmail-account .step p { margin: .3rem 0 .5rem; }
-#gmail-account .grow { flex: 1; min-width: 240px; }
 .steps-list { margin: .3rem 0 .5rem 1.2rem; padding: 0; }
 .steps-list li { margin: .3rem 0; }
 .gmail-more summary { cursor: pointer; color: var(--muted); }
@@ -253,3 +252,5 @@ a.chip:hover { text-decoration: none; border-color: var(--accent); }
 .reply-subject { margin: .25rem 0 .1rem; font-weight: 500; overflow-wrap: anywhere; }
 .reply-snippet { overflow-wrap: anywhere; }
 .reply-actions { margin-top: .3rem; }
+.reply-cell { min-width: 11rem; max-width: 17rem; }
+.reply-line { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: .2rem; }

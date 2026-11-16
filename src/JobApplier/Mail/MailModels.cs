@@ -48,24 +48,6 @@ public static class ReplyKindExtensions
     };
 }
 
-/// <summary>One e-mail as far as this app needs it. <paramref name="Body"/> is empty until the full message has been fetched.</summary>
-public sealed record MailMessage(
-    string Id,
-    string ThreadId,
-    string FromName,
-    string FromAddress,
-    string Subject,
-    DateTime DateUtc,
-    string Snippet,
-    IReadOnlyList<string> Labels,
-    string Body = "")
-{
-    /// <summary>"Jane at Acme &lt;jobs@acme.com&gt;" as it would be shown.</summary>
-    public string From => FromName.Length > 0 ? $"{FromName} <{FromAddress}>" : FromAddress;
-
-    public string Domain => FromAddress.Contains('@') ? FromAddress[(FromAddress.LastIndexOf('@') + 1)..].ToLowerInvariant() : "";
-}
-
 /// <summary>
 /// A reply to an application, as saved. Only what is needed to show it is kept - sender, subject, date and a short snippet - never
 /// the whole message, which stays in Gmail (<see cref="GmailLink"/> opens it).

@@ -71,6 +71,8 @@ public sealed class SettingsService
         s.MaxParallelJobs = Math.Clamp(s.MaxParallelJobs, 1, 8);
         s.DefaultMinMatchPercent = Math.Clamp(s.DefaultMinMatchPercent, 0, 100);
         s.HelpTimeoutMinutes = Math.Clamp(s.HelpTimeoutMinutes, 2, 240);
+        s.MailModel = (s.MailModel ?? "").Trim();
+        s.MailAutoCheckHours = Math.Clamp(s.MailAutoCheckHours, 0, 72);
         s.AccountsDocumentPath = (s.AccountsDocumentPath ?? "").Trim().Trim('"');
         s.PlaywrightMcpVersion = string.IsNullOrWhiteSpace(s.PlaywrightMcpVersion) ? "0.0.85" : s.PlaywrightMcpVersion.Trim();
         return s;

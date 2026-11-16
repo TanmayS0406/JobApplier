@@ -88,6 +88,21 @@ public static class ClaudeCli
         return Process.Start(info);
     }
 
+    /// <summary>
+    /// Opens a console window with Claude Code itself running, starting with <paramref name="firstInput"/> (for example <c>/mcp</c>,
+    /// Claude's own screen for connecting and signing in to connectors). The user finishes there; nothing is read back from it.
+    /// </summary>
+    public static Process? StartInteractive(string cliPath, string? firstInput)
+    {
+        var command = QuoteArgument(cliPath) + (string.IsNullOrEmpty(firstInput) ? "" : " " + QuoteArgument(firstInput));
+        var info = new ProcessStartInfo("cmd.exe", "/d /s /c \"" + command + "\"")
+        {
+            UseShellExecute = true,
+            WorkingDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)
+        };
+        return Process.Start(info);
+    }
+
     public static async Task<int> LogoutAsync(string cliPath, CancellationToken cancellationToken)
     {
         var (exitCode, _) = await RunToEndAsync(cliPath, new[] { "auth", "logout" }, cancellationToken);

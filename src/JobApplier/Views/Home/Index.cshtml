@@ -53,7 +53,8 @@
 </section>
 
 <div id="replies" data-poll-url="@Url.Action("Replies", "Gmail")" data-poll-ms="60000"
-     data-check-url="@Url.Action("Check", "Gmail")" data-dismiss-url="@Url.Action("Dismiss", "Gmail")">
+     data-check-url="@Url.Action("Check", "Gmail")" data-dismiss-url="@Url.Action("Dismiss", "Gmail")"
+     data-enable-url="@Url.Action("Enable", "Gmail")">
     @await Html.PartialAsync("_Replies", Model.Replies)
 </div>
 

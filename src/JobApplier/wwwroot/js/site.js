@@ -236,7 +236,7 @@
         });
     })();
 
-    // ---------- Gmail: Settings card ----------
+    // ---------- Gmail replies: Settings card (Claude reads the mailbox through the Gmail connector of the user's Claude account) ----------
     (function setupGmail() {
         const account = document.getElementById('gmail-account');
         if (!account) return;
@@ -244,43 +244,45 @@
         const post = async (url, body) => (await fetch(url, { method: 'POST', headers: { RequestVerificationToken: csrf }, body })).json();
         const when = iso => (iso ? new Date(iso).toLocaleString() : '');
         let status = null;
+        let waiting = null;   // polls while the user finishes connecting Gmail in the Claude window
+        const stopWaiting = () => { if (waiting) { clearInterval(waiting); waiting = null; } };
 
-        async function refresh() {
+        // force = ask a live Claude session about the connector again (a few seconds); otherwise a recent answer is used.
+        async function refresh(force) {
             try {
-                status = await (await fetch(account.dataset.statusUrl, { cache: 'no-store' })).json();
-            } catch { return; }
+                status = await (await fetch(`${account.dataset.statusUrl}?force=${force ? 'true' : 'false'}`, { cache: 'no-store' })).json();
+            } catch { return null; }
             const s = status;
+            const ready = s.state === 'ready';
 
             let text;
-            if (s.connected) {
-                text = 'Connected' + (s.email ? ' as ' + s.email : '') + (s.connectedUtc ? ' since ' + when(s.connectedUtc) : '') + '. '
-                    + (s.checking ? 'Looking through the mailbox now...'
-                        : (s.lastCheckedUtc ? 'Last checked ' + when(s.lastCheckedUtc) + '. ' : 'Not checked yet. ')
-                        + s.replyCount + ' repl' + (s.replyCount === 1 ? 'y' : 'ies') + ' found so far.');
-                if (s.lastError) text += ' The last check failed: ' + s.lastError;
-            } else if (s.needsReconnect) {
-                text = 'The connection ended (Google ends it after 7 days while the consent screen is in "Testing", or when access was removed). Press Connect Gmail to sign in again.';
-            } else if (s.hasClient) {
-                text = 'Google client saved (' + s.clientHint + '). Press Connect Gmail.';
+            if (s.checking) {
+                text = 'Claude is looking through your mailbox now...';
+            } else if (ready) {
+                text = 'Gmail is connected through your Claude account. ';
+                text += s.enabled
+                    ? 'Tracking is on' + (s.autoHours > 0 ? ` (checked by itself every ${s.autoHours} h)` : ' (only when you press the button)')
+                        + (s.lastCheckedUtc ? '; last checked ' + when(s.lastCheckedUtc) : '; not checked yet') + `. ${s.replyCount} repl${s.replyCount === 1 ? 'y' : 'ies'} found so far.`
+                    : 'Tracking is off: press Start tracking replies in step 2.';
+                if (s.enabled && s.lastError) text += ' The last check failed: ' + s.lastError;
             } else {
-                text = 'Not connected. Do step 1, then press Save client.';
+                text = s.detail;
             }
             $('gmail-text').textContent = text;
 
             const chip = $('gmail-chip');
-            chip.hidden = !(s.connected || s.needsReconnect);
-            chip.textContent = s.connected ? 'connected' : 'expired';
-            chip.className = 'chip ' + (s.connected ? 'chip-good' : 'chip-gap');
+            chip.hidden = s.state === 'unknown';
+            chip.textContent = ready ? 'connected' : 'not connected';
+            chip.className = 'chip ' + (ready ? 'chip-good' : 'chip-gap');
 
-            $('gmail-client-id').placeholder = s.hasClient ? 'saved: ' + s.clientHint + ' (paste a new one to replace it)' : 'Client ID (…apps.googleusercontent.com)';
-            $('gmail-client-secret').placeholder = s.hasClient ? 'saved (leave empty to keep it)' : 'Client secret';
-            $('gmail-connect').disabled = !s.hasClient || s.connected;
-            $('gmail-connect').textContent = s.needsReconnect ? 'Connect Gmail again' : 'Connect Gmail';
-            $('gmail-check').disabled = !s.connected || s.checking;
-            $('gmail-rescan').disabled = !s.connected || s.checking;
-            $('gmail-disconnect').disabled = !s.connected && !s.needsReconnect;
-            $('gmail-remove').disabled = !s.hasClient;
+            $('gmail-connect').disabled = ready || s.state === 'climissing';
+            $('gmail-verify').disabled = !!s.checking;
+            $('gmail-enable').disabled = !ready || s.enabled || !!s.checking;
+            $('gmail-check').disabled = !ready || !!s.checking;
+            $('gmail-rescan').disabled = !ready || !!s.checking;
+            $('gmail-disable').disabled = !s.enabled;
             $('gmail-clear').disabled = s.replyCount === 0;
+            return s;
         }
 
         // A busy button shows what it is doing; the message line keeps the result.
@@ -293,29 +295,45 @@
             } catch {
                 msg.textContent = 'Could not reach the app. Is it still running?';
             }
-            await refresh();
+            await refresh(false);
         }
 
-        $('gmail-save').addEventListener('click', async () => {
-            const msg = $('gmail-client-msg'), button = $('gmail-save');
-            const data = new FormData();
-            data.append('clientId', $('gmail-client-id').value);
-            data.append('clientSecret', $('gmail-client-secret').value);
-            button.disabled = true;
+        $('gmail-connect').addEventListener('click', async () => {
+            const msg = $('gmail-connect-msg');
+            $('gmail-connect').disabled = true;
             try {
-                const result = await post(account.dataset.saveclientUrl, data);
-                msg.textContent = result.message;
-                if (result.ok) { $('gmail-client-id').value = ''; $('gmail-client-secret').value = ''; }
-            } catch { msg.textContent = 'Could not reach the app.'; }
-            button.disabled = false;
-            await refresh();
+                const result = await post(account.dataset.connectUrl);
+                if (!result.ok) { msg.textContent = result.error; $('gmail-connect').disabled = false; return; }
+            } catch { msg.textContent = 'Could not reach the app.'; $('gmail-connect').disabled = false; return; }
+
+            msg.textContent = 'A Claude window opened. Choose claude.ai Gmail, then Authenticate (or type /mcp). This page notices by itself when it works.';
+            stopWaiting();
+            let tries = 0;
+            waiting = setInterval(async () => {
+                const s = await refresh(true);
+                if (s && s.state === 'ready') { stopWaiting(); msg.textContent = 'Gmail is connected. You can close the Claude window.'; }
+                else if (++tries >= 60) { stopWaiting(); msg.textContent = 'Still not connected. Finish the sign-in, then press Check connection.'; }
+            }, 10000);
         });
 
-        $('gmail-connect').addEventListener('click', () => run($('gmail-connect'), 'Opening Google...', async (msg) => {
-            const result = await post(account.dataset.connectUrl);
-            if (!result.ok) { msg.textContent = result.error; return; }
-            // location.assign, not a form post: the Content-Security-Policy (form-action 'self') would also block the redirect to Google.
-            location.assign(result.url);
+        $('gmail-verify').addEventListener('click', async () => {
+            const msg = $('gmail-connect-msg');
+            $('gmail-verify').disabled = true;
+            msg.textContent = 'Asking Claude which connectors it can use...';
+            const s = await refresh(true);
+            msg.textContent = s ? s.detail : 'Could not reach the app.';
+        });
+
+        $('gmail-enable').addEventListener('click', () => run($('gmail-enable'), 'Starting...', async (msg) => {
+            const started = await post(account.dataset.enableUrl);
+            msg.textContent = started.message;
+            if (!started.ok) return;   // Claude cannot use Gmail yet: nothing was turned on, the message says what is missing
+            // The first check runs in the background; follow it until it is done.
+            const timer = setInterval(async () => {
+                const s = await refresh(false);
+                if (s && !s.checking) { clearInterval(timer); $('gmail-msg').textContent = s.lastError ? 'The first check failed: ' + s.lastError : 'The first check is done.'; }
+            }, 5000);
+            setTimeout(() => clearInterval(timer), 15 * 60 * 1000);
         }));
 
         const check = (rescan) => async (msg) => {
@@ -324,18 +342,12 @@
             const result = await post(account.dataset.checkUrl, data);
             msg.textContent = result.message;
         };
-        $('gmail-check').addEventListener('click', () => run($('gmail-check'), 'Looking through your mailbox... the first time this can take a minute.', check(false)));
-        $('gmail-rescan').addEventListener('click', () => run($('gmail-rescan'), 'Reading the mailbox again...', check(true)));
+        $('gmail-check').addEventListener('click', () => run($('gmail-check'), 'Claude is looking through your mailbox... this can take a minute or two.', check(false)));
+        $('gmail-rescan').addEventListener('click', () => run($('gmail-rescan'), 'Claude is reading the mailbox back to your first application...', check(true)));
 
-        $('gmail-disconnect').addEventListener('click', () => run($('gmail-disconnect'), 'Disconnecting...', async (msg) => {
-            msg.textContent = (await post(account.dataset.disconnectUrl)).message;
+        $('gmail-disable').addEventListener('click', () => run($('gmail-disable'), 'Stopping...', async (msg) => {
+            msg.textContent = (await post(account.dataset.disableUrl)).message;
         }));
-        $('gmail-remove').addEventListener('click', () => {
-            if (!confirm('Disconnect Gmail and delete the saved Client ID and secret? You will have to paste them again to reconnect.')) return;
-            return run($('gmail-remove'), 'Removing...', async (msg) => {
-                msg.textContent = (await post(account.dataset.removeclientUrl)).message;
-            });
-        });
         $('gmail-clear').addEventListener('click', () => {
             if (!confirm('Delete every saved reply? Your mailbox is not touched; the next check finds the replies again.')) return;
             return run($('gmail-clear'), 'Deleting...', async (msg) => {
@@ -343,8 +355,8 @@
             });
         });
 
-        refresh();
-        setInterval(() => { if (!document.hidden) refresh(); }, 15000);
+        refresh(false);
+        setInterval(() => { if (!document.hidden && status && status.checking) refresh(false); }, 5000);
     })();
 
     // ---------- Gmail: replies card on the dashboard (it is re-rendered by polling, so clicks are handled on the document) ----------
@@ -356,6 +368,37 @@
             const r = await fetch(area.dataset.pollUrl, { cache: 'no-store' });
             if (r.ok) area.innerHTML = await r.text();
         };
+
+        // Follows the first check after tracking was started: redraws the card until Claude is done with it.
+        const followChecking = () => {
+            let seen = false, ticks = 0;
+            const timer = setInterval(async () => {
+                await redraw();
+                ticks++;
+                const checking = !!area.querySelector('[data-checking="true"]');
+                if (checking) seen = true;
+                if ((seen && !checking) || (!seen && ticks >= 5) || ticks > 240) clearInterval(timer);
+            }, 3000);
+        };
+
+        const enableButton = event.target.closest('[data-gmail-enable]');
+        if (enableButton && area.contains(enableButton)) {
+            enableButton.disabled = true;
+            const msg = area.querySelector('[data-gmail-msg]');
+            if (msg) msg.textContent = 'Checking that Claude can reach your Gmail...';
+            let result = null;
+            try {
+                result = await (await fetch(area.dataset.enableUrl, { method: 'POST', headers: { RequestVerificationToken: csrf } })).json();
+            } catch { /* reported below */ }
+            if (!result || !result.ok) {
+                enableButton.disabled = false;
+                if (msg) msg.textContent = result ? result.message : 'Could not reach the app. Is it still running?';
+                return;
+            }
+            await redraw();
+            followChecking();
+            return;
+        }
 
         const checkButton = event.target.closest('[data-gmail-check]');
         if (checkButton && area.contains(checkButton)) {

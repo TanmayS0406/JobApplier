@@ -79,6 +79,7 @@
                         <th>Location</th>
                         <th class="match-col">Match with your resume</th>
                         <th>Status</th>
+                        <th>Employer reply</th>
                         <th>Posting</th>
                     </tr>
                 </thead>
@@ -106,11 +107,6 @@
                             </td>
                             <td>
                                 <span class="chip status-@row.Status.ToString().ToLowerInvariant()">@row.Status.Label()</span>
-                                @if (Model.Replies.TryGetValue(row.Id, out var reply))
-                                {
-                                    <a class="chip @reply.Kind.Css()" href="#replies"
-                                       title="Latest mail from the employer: @reply.Subject">@(reply.Kind == ReplyKind.Acknowledged ? "mail: received" : reply.Kind.Label())@(reply.Confident ? "" : "?")</a>
-                                }
                                 @if (row.NeedsUser)
                                 {
                                     <span class="chip chip-alert">needs you</span>
@@ -126,6 +122,22 @@
                                 @if (!string.IsNullOrWhiteSpace(row.StatusDetail))
                                 {
                                     <div class="muted small status-detail">@row.StatusDetail</div>
+                                }
+                            </td>
+                            <td class="reply-cell">
+                                @if (Model.Replies.TryGetValue(row.Id, out var reply))
+                                {
+                                    <a class="chip @reply.Kind.Css()" href="#replies" title="Latest mail from the employer: @reply.Subject">@reply.Kind.Label()@(reply.Confident ? "" : "?")</a>
+                                    <div class="muted small reply-line" title="@reply.Subject">@reply.Subject</div>
+                                    <div class="muted small">@RelativeTime.Ago(reply.ReceivedUtc)</div>
+                                }
+                                else if (Model.RepliesTracked && row.Status == JobStatus.Applied)
+                                {
+                                    <span class="muted small">no reply yet</span>
+                                }
+                                else
+                                {
+                                    <span class="muted">-</span>
                                 }
                             </td>
                             <td>

@@ -30,11 +30,9 @@ builder.Services.AddSingleton<ClaudeAccountService>();
 builder.Services.AddSingleton<GeminiAccountService>();
 builder.Services.AddHttpClient<GeminiKeyChecker>(client => client.Timeout = TimeSpan.FromSeconds(10));
 
-// Gmail (read-only): sign-in with the user's own Google client, then a periodic look for replies to the applications.
-builder.Services.AddSingleton(_ => new GoogleOAuthClient(NewMailHttpClient(15)));
-builder.Services.AddSingleton<GmailConnection>();
-builder.Services.AddSingleton<IMailAccess>(sp => sp.GetRequiredService<GmailConnection>());
-builder.Services.AddSingleton<IGmailApi>(sp => new GmailApi(NewMailHttpClient(30), sp.GetRequiredService<GmailConnection>()));
+// Gmail replies: Claude reads the mailbox through the Gmail connector of the user's own Claude account (read-only tools only),
+// once the user has turned tracking on.
+builder.Services.AddSingleton<IMailReader, ClaudeMailReader>();
 builder.Services.AddSingleton<ReplyStore>();
 builder.Services.AddSingleton<MailChecker>();
 builder.Services.AddHostedService<MailWatcher>();
@@ -128,10 +126,6 @@ app.MapMethods("/mcp/{jobId:guid}", new[] { "GET", "DELETE" }, () => Results.Sta
 app.MapControllerRoute(name: "default", pattern: "{controller=Home}/{action=Index}/{id?}");
 
 app.Run();
-
-// A long-lived client for Google. The connection lifetime is limited so a changed DNS answer is eventually picked up.
-static HttpClient NewMailHttpClient(int timeoutSeconds) =>
-    new(new SocketsHttpHandler { PooledConnectionLifetime = TimeSpan.FromMinutes(5) }) { Timeout = TimeSpan.FromSeconds(timeoutSeconds) };
 
 // Lets the test project start the app if it ever needs to.
 public partial class Program;
