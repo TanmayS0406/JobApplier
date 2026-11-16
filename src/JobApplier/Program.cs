@@ -3,6 +3,7 @@ using System.Text.Json.Nodes;
 using JobApplier.Agents;
 using JobApplier.Claude;
 using JobApplier.Infrastructure;
+using JobApplier.Mail;
 using JobApplier.Mcp;
 using JobApplier.Services;
 using Microsoft.AspNetCore.Hosting.Server;
@@ -27,6 +28,17 @@ builder.Services.AddSingleton<AccountService>();
 builder.Services.AddSingleton<HumanHelpBroker>();
 builder.Services.AddSingleton<ClaudeAccountService>();
 builder.Services.AddSingleton<GeminiAccountService>();
+builder.Services.AddHttpClient<GeminiKeyChecker>(client => client.Timeout = TimeSpan.FromSeconds(10));
+
+// Gmail (read-only): sign-in with the user's own Google client, then a periodic look for replies to the applications.
+builder.Services.AddSingleton(_ => new GoogleOAuthClient(NewMailHttpClient(15)));
+builder.Services.AddSingleton<GmailConnection>();
+builder.Services.AddSingleton<IMailAccess>(sp => sp.GetRequiredService<GmailConnection>());
+builder.Services.AddSingleton<IGmailApi>(sp => new GmailApi(NewMailHttpClient(30), sp.GetRequiredService<GmailConnection>()));
+builder.Services.AddSingleton<ReplyStore>();
+builder.Services.AddSingleton<MailChecker>();
+builder.Services.AddHostedService<MailWatcher>();
+
 builder.Services.AddSingleton<JobStore>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<JobStore>());
 
@@ -116,6 +128,10 @@ app.MapMethods("/mcp/{jobId:guid}", new[] { "GET", "DELETE" }, () => Results.Sta
 app.MapControllerRoute(name: "default", pattern: "{controller=Home}/{action=Index}/{id?}");
 
 app.Run();
+
+// A long-lived client for Google. The connection lifetime is limited so a changed DNS answer is eventually picked up.
+static HttpClient NewMailHttpClient(int timeoutSeconds) =>
+    new(new SocketsHttpHandler { PooledConnectionLifetime = TimeSpan.FromMinutes(5) }) { Timeout = TimeSpan.FromSeconds(timeoutSeconds) };
 
 // Lets the test project start the app if it ever needs to.
 public partial class Program;

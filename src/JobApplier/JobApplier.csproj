@@ -14,6 +14,8 @@
     <PackageReference Include="Microsoft.Agents.AI.Workflows" Version="1.28.0" />
     <!-- Writes the accounts document (.docx) on the Desktop. -->
     <PackageReference Include="DocumentFormat.OpenXml" Version="3.5.1" />
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="10.0.13" />
+    <!-- Encrypts the Gmail refresh token for the current Windows user (DPAPI). -->
   </ItemGroup>
 
   <ItemGroup>

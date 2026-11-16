@@ -12,10 +12,13 @@ public class SettingsController : Controller
     private readonly AccountService _accounts;
     private readonly ClaudeAccountService _claude;
     private readonly GeminiAccountService _gemini;
+    private readonly GeminiKeyChecker _geminiKeys;
     private readonly AppPaths _paths;
 
-    public SettingsController(SettingsService settings, AccountService accounts, ClaudeAccountService claude, GeminiAccountService gemini, AppPaths paths)
+    public SettingsController(SettingsService settings, AccountService accounts, ClaudeAccountService claude, GeminiAccountService gemini,
+                              GeminiKeyChecker geminiKeys, AppPaths paths)
     {
+        _geminiKeys = geminiKeys;
         _settings = settings;
         _accounts = accounts;
         _claude = claude;
@@ -60,7 +63,40 @@ public class SettingsController : Controller
     {
         var s = _gemini.GetStatus();
         Response.Headers.CacheControl = "no-store";
-        return Json(new { cliFound = s.CliFound, loggedIn = s.LoggedIn, detail = s.Detail, plan = (string?)null });
+        return Json(new { cliFound = s.CliFound, loggedIn = s.LoggedIn, detail = s.Detail, plan = (string?)null, source = s.Source, npmFound = s.NpmFound });
+    }
+
+    /// <summary>Opens a console window that installs the Gemini CLI.</summary>
+    [HttpPost]
+    public IActionResult GeminiInstall()
+    {
+        var error = _gemini.StartInstall();
+        return Json(new { ok = error == null, error });
+    }
+
+    /// <summary>
+    /// Saves a pasted Gemini API key. Google is asked first, so a typo is caught here instead of by a failed job; a key Google refuses
+    /// is never saved, and one that could not be checked (offline) is saved with a note. The key is never echoed back or logged.
+    /// </summary>
+    [HttpPost]
+    public async Task<IActionResult> GeminiSaveKey([FromForm] string? key, CancellationToken cancellationToken)
+    {
+        key = (key ?? "").Trim().Trim('"', '\'');
+        if (GeminiAccountService.KeyShapeError(key) is { } shapeError) return Json(new { ok = false, message = shapeError });
+
+        var check = await _geminiKeys.CheckAsync(key, cancellationToken);
+        if (check.Outcome == KeyCheck.Invalid) return Json(new { ok = false, message = check.Message });
+
+        var error = _gemini.SaveApiKey(key);
+        if (error != null) return Json(new { ok = false, message = error });
+        return Json(new { ok = true, message = check.Outcome == KeyCheck.Valid ? "Key accepted and saved." : "Saved. " + check.Message });
+    }
+
+    [HttpPost]
+    public IActionResult GeminiRemoveKey()
+    {
+        var message = _gemini.RemoveApiKey();
+        return Json(new { ok = true, message });
     }
 
     /// <summary>Opens Gemini's own "Login with Google" in a console window.</summary>
@@ -111,7 +147,7 @@ public class SettingsController : Controller
                 ? new SystemCheck("Gemini CLI", cliFound, _gemini.CliPath ?? "Not found. Install it with: npm install -g @google/gemini-cli")
                 : new SystemCheck("Claude Code CLI", cliFound, _claude.CliPath ?? "Not found. Install it from https://claude.com/claude-code"),
             gemini
-                ? new SystemCheck("Signed in to Gemini", signedIn, signedIn ? "Yes: " + detail : "Not signed in - use the button above, or set GEMINI_API_KEY.")
+                ? new SystemCheck("Signed in to Gemini", signedIn, signedIn ? "Yes: " + detail : "Not signed in - paste an API key or sign in with Google in the card above.")
                 : new SystemCheck("Signed in to Claude", signedIn, signedIn ? "Yes" : "Not signed in - use the button above."),
             SystemChecks.Npx(),
             SystemChecks.Browser(settings.Browser),

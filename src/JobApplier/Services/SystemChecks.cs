@@ -59,7 +59,7 @@ public static class SystemChecks
         return folderCheck.Ok ? new SystemCheck(name, true, file) : folderCheck;
     }
 
-    private static string? FindOnPath(string[] names)
+    internal static string? FindOnPath(string[] names)
     {
         foreach (var dir in (Environment.GetEnvironmentVariable("PATH") ?? "").Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
         {

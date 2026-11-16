@@ -1,4 +1,5 @@
 using JobApplier.Domain;
+using JobApplier.Mail;
 
 namespace JobApplier.Models;
 
@@ -57,11 +58,33 @@ public sealed class LiveViewModel
 
     public IReadOnlyList<JobRow> Rows { get; init; } = Array.Empty<JobRow>();
     public IReadOnlyList<HelpItem> Help { get; init; } = Array.Empty<HelpItem>();
+
+    /// <summary>What the employer's mail says about each job (by job id), for the chip in the results table. Empty when Gmail is not used.</summary>
+    public IReadOnlyDictionary<Guid, EmployerReply> Replies { get; init; } = new Dictionary<Guid, EmployerReply>();
+}
+
+/// <summary>The "Replies from employers" card on the dashboard.</summary>
+public sealed class RepliesViewModel
+{
+    public bool HasClient { get; init; }
+    public bool Connected { get; init; }
+    public bool NeedsReconnect { get; init; }
+    public string Email { get; init; } = "";
+    public bool Checking { get; init; }
+    public int ApplicationCount { get; init; }
+    public DateTime? LastCheckedUtc { get; init; }
+    public string LastError { get; init; } = "";
+
+    /// <summary>Newest first.</summary>
+    public IReadOnlyList<EmployerReply> Replies { get; init; } = Array.Empty<EmployerReply>();
+
+    public int Count(ReplyKind kind) => Replies.Count(r => r.Kind == kind);
 }
 
 public sealed class DashboardViewModel
 {
     public required LiveViewModel Live { get; init; }
+    public required RepliesViewModel Replies { get; init; }
     public bool HasResume { get; init; }
     public bool HasEmail { get; init; }
     public string ProfileEmail { get; init; } = "";

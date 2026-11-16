@@ -73,6 +73,10 @@ h3 { font-size: .85rem; margin: 1rem 0 .4rem; text-transform: uppercase; letter-
 .card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 1.1rem 1.3rem; margin-bottom: 1.1rem; }
 .card-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; margin-bottom: .4rem; }
 .head-tools { display: flex; align-items: center; gap: .8rem; flex-wrap: wrap; justify-content: flex-end; }
+#gemini-account .step { border: 1px solid var(--line); border-radius: 8px; padding: .8rem 1rem; margin: .8rem 0; }
+#gemini-account .step p { margin: .3rem 0 .5rem; }
+#gemini-account input[type=password] { min-width: 18rem; }
+kbd { font: .85em Consolas, "Cascadia Mono", monospace; padding: 0 .35rem; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; }
 .chip-limit { background: color-mix(in srgb, var(--mid) 20%, var(--panel)); border: 1px solid var(--mid); color: var(--text); }
 .head-tools form { margin: 0; }
 .btn.compact { padding: .2rem .7rem; font-size: .85rem; }
@@ -97,7 +101,7 @@ button.link { background: none; border: 0; padding: 0; font: inherit; color: var
 .actions { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem; margin-top: .9rem; }
 .actions form { margin: 0; }
 
-input[type=text], input[type=email], input[type=number], input:not([type]), select, textarea {
+input[type=text], input[type=email], input[type=number], input[type=password], input:not([type]), select, textarea {
     font: inherit; padding: .42rem .6rem; border: 1px solid var(--line); border-radius: 7px;
     background: var(--bg); color: var(--text); width: 100%;
 }
@@ -222,3 +226,30 @@ li.bad .check-mark { background: color-mix(in srgb, var(--low) 20%, var(--panel)
 .busy-box { background: var(--panel); padding: 1.6rem 2rem; border-radius: var(--radius); text-align: center; max-width: 380px; }
 .spinner { width: 34px; height: 34px; margin: 0 auto .8rem; border: 4px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+/* ---- Gmail replies ---- */
+#gmail-account .step { border: 1px solid var(--line); border-radius: 8px; padding: .8rem 1rem; margin: .8rem 0; }
+#gmail-account .step p { margin: .3rem 0 .5rem; }
+#gmail-account .grow { flex: 1; min-width: 240px; }
+.steps-list { margin: .3rem 0 .5rem 1.2rem; padding: 0; }
+.steps-list li { margin: .3rem 0; }
+.gmail-more summary { cursor: pointer; color: var(--muted); }
+
+.chip[hidden] { display: none; }   /* .chip sets display, which would otherwise win over the hidden attribute */
+a.chip:hover { text-decoration: none; border-color: var(--accent); }
+.reply-offer { background: color-mix(in srgb, var(--good) 28%, var(--panel)); border-color: var(--good); color: var(--good); font-weight: 700; }
+.reply-moving { background: color-mix(in srgb, var(--good) 16%, var(--panel)); border-color: var(--good); color: var(--good); font-weight: 600; }
+.reply-info { background: color-mix(in srgb, var(--mid) 18%, var(--panel)); border-color: var(--mid); color: var(--text); font-weight: 600; }
+.reply-rejected { background: color-mix(in srgb, var(--low) 14%, var(--panel)); border-color: var(--low); color: var(--low); font-weight: 600; }
+.reply-ack, .reply-unclear { background: var(--code-bg); color: var(--muted); }
+.chip-unsure { background: transparent; border-style: dashed; color: var(--muted); cursor: help; }
+
+.reply-summary { margin: .2rem 0 .5rem; }
+.reply-list { list-style: none; margin: .4rem 0 0; padding: 0; }
+.reply { border-top: 1px solid var(--line); padding: .65rem 0; }
+.reply:first-child { border-top: 0; }
+.reply-top { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; }
+.reply-date { margin-left: auto; }
+.reply-subject { margin: .25rem 0 .1rem; font-weight: 500; overflow-wrap: anywhere; }
+.reply-snippet { overflow-wrap: anywhere; }
+.reply-actions { margin-top: .3rem; }

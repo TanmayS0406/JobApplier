@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using JobApplier.Mail;
 using JobApplier.Models;
 using JobApplier.Services;
 using Microsoft.AspNetCore.Mvc;
@@ -11,13 +12,22 @@ public class HomeController : Controller
     private readonly ProfileService _profile;
     private readonly SettingsService _settings;
     private readonly JobRunner _runner;
+    private readonly GmailConnection _gmail;
+    private readonly ReplyStore _replies;
+    private readonly MailChecker _checker;
+    private readonly AccountService _accounts;
 
-    public HomeController(JobStore store, ProfileService profile, SettingsService settings, JobRunner runner)
+    public HomeController(JobStore store, ProfileService profile, SettingsService settings, JobRunner runner,
+                          GmailConnection gmail, ReplyStore replies, MailChecker checker, AccountService accounts)
     {
         _store = store;
         _profile = profile;
         _settings = settings;
         _runner = runner;
+        _gmail = gmail;
+        _replies = replies;
+        _checker = checker;
+        _accounts = accounts;
     }
 
     public IActionResult Index()
@@ -26,7 +36,8 @@ public class HomeController : Controller
         var settings = _settings.Current;
         return View(new DashboardViewModel
         {
-            Live = LiveViewModelBuilder.Build(_store, _runner.PausedUntilUtc),
+            Live = LiveViewModelBuilder.Build(_store, _runner.PausedUntilUtc, _replies),
+            Replies = RepliesViewModelBuilder.Build(_gmail, _replies, _checker, _accounts),
             HasResume = _profile.HasResume && !string.IsNullOrWhiteSpace(profile.ResumeText),
             HasEmail = !string.IsNullOrWhiteSpace(profile.Email),
             ProfileEmail = profile.Email,
@@ -41,7 +52,7 @@ public class HomeController : Controller
     [HttpGet]
     public IActionResult Live()
     {
-        var model = LiveViewModelBuilder.Build(_store, _runner.PausedUntilUtc);
+        var model = LiveViewModelBuilder.Build(_store, _runner.PausedUntilUtc, _replies);
         Response.Headers["X-Help-Count"] = model.Help.Count.ToString();
         Response.Headers.CacheControl = "no-store";
         return PartialView("_Live", model);

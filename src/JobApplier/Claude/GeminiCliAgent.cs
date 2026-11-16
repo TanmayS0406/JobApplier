@@ -38,6 +38,7 @@ public sealed class GeminiCliAgent : CliAgent
 
         var info = ClaudeCli.CreateStartInfo(cliPath, BuildArguments(), Spec.WorkingDirectory);
         info.Environment[SettingsVariable] = settingsFile;
+        GeminiCli.ApplyStoredApiKey(info.Environment);   // a key saved from Settings authenticates the run without the user setting a variable
         using var process = ClaudeCli.Start(info);
         using var kill = cancellationToken.Register(() => ClaudeCli.KillTree(process));
 

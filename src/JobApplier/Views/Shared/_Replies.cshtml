@@ -1,0 +1,127 @@
+@model RepliesViewModel
+@{
+    string Ago(DateTime utc)
+    {
+        var span = DateTime.UtcNow - utc;
+        if (span.TotalMinutes < 1) return "just now";
+        if (span.TotalMinutes < 60) return $"{(int)span.TotalMinutes} min ago";
+        if (span.TotalHours < 24) return $"{(int)span.TotalHours} h ago";
+        return $"{(int)span.TotalDays} d ago";
+    }
+
+    const int Shown = 40;
+    var kinds = new[] { ReplyKind.Offer, ReplyKind.MovingForward, ReplyKind.InfoRequested, ReplyKind.Rejected, ReplyKind.Acknowledged, ReplyKind.Unclear };
+}
+
+@if (!Model.Connected && Model.Replies.Count == 0)
+{
+    <section class="card replies-card">
+        <div class="card-head"><h2>Replies from employers</h2></div>
+        @if (Model.NeedsReconnect)
+        {
+            <div class="banner banner-warn">
+                <strong>The Gmail connection has expired.</strong> Google asks for a new sign-in every 7 days while the consent screen is in "Testing".
+                <a asp-controller="Settings" asp-action="Index" asp-fragment="gmail">Connect Gmail again</a>.
+            </div>
+        }
+        else
+        {
+            <p class="muted">
+                Connect your Gmail (read-only) and JobApplier tells you which employers answered: application received, an interview or next
+                step, a request for more information, a rejection or an offer. It is read on this PC only.
+            </p>
+            <a class="btn" asp-controller="Settings" asp-action="Index" asp-fragment="gmail">Connect Gmail</a>
+        }
+    </section>
+}
+else
+{
+    <section class="card replies-card">
+        <div class="card-head">
+            <h2>Replies from employers</h2>
+            <div class="head-tools">
+                @if (Model.Connected)
+                {
+                    <span class="muted small">
+                        @(Model.Email.Length > 0 ? Model.Email + " · " : "")@(Model.LastCheckedUtc is DateTime checkedAt ? "checked " + Ago(checkedAt) : "not checked yet")
+                    </span>
+                    <button type="button" class="btn compact" data-gmail-check disabled="@Model.Checking"
+                            title="Look through your mailbox for new answers now. It also happens by itself every 30 minutes.">@(Model.Checking ? "Checking..." : "Check now")</button>
+                }
+            </div>
+        </div>
+
+        @if (Model.NeedsReconnect)
+        {
+            <div class="banner banner-warn">
+                <strong>The Gmail connection has expired.</strong> Google asks for a new sign-in every 7 days while the consent screen is in "Testing".
+                <a asp-controller="Settings" asp-action="Index" asp-fragment="gmail">Connect Gmail again</a>. The replies below are kept.
+            </div>
+        }
+        else if (Model.Connected && Model.LastError.Length > 0)
+        {
+            <div class="banner banner-warn">The last check did not finish: @Model.LastError</div>
+        }
+
+        @if (Model.Replies.Count > 0)
+        {
+            <div class="chips reply-summary">
+                @foreach (var kind in kinds)
+                {
+                    var count = Model.Count(kind);
+                    if (count > 0)
+                    {
+                        <span class="chip @kind.Css()">@count @kind.Label().ToLowerInvariant()</span>
+                    }
+                }
+            </div>
+
+            <ul class="reply-list">
+                @foreach (var reply in Model.Replies.Take(Shown))
+                {
+                    <li class="reply">
+                        <div class="reply-top">
+                            <span class="chip @reply.Kind.Css()">@reply.Kind.Label()</span>
+                            @if (!reply.Confident)
+                            {
+                                <span class="chip chip-unsure" title="The wording pointed two ways (for example a rejection that also mentions an interview). Open the mail to be sure.">check</span>
+                            }
+                            <strong>@reply.Company</strong>
+                            @if (reply.Role.Length > 0)
+                            {
+                                <span class="muted">@reply.Role</span>
+                            }
+                            <span class="muted small reply-date" title="@reply.ReceivedUtc.ToLocalTime().ToString("f")">@Ago(reply.ReceivedUtc)</span>
+                        </div>
+                        <div class="reply-subject">@reply.Subject</div>
+                        <div class="muted small">@reply.From</div>
+                        @if (reply.Snippet.Length > 0)
+                        {
+                            <div class="muted small reply-snippet">@reply.Snippet</div>
+                        }
+                        <div class="small reply-actions">
+                            <a href="@reply.GmailLink" target="_blank" rel="noopener noreferrer">Open in Gmail</a>
+                            &middot;
+                            <button type="button" class="link" data-reply-dismiss="@reply.Id" title="Remove this reply. It will not be matched to a job again.">Not about this job</button>
+                            @if (reply.Reason.Length > 0)
+                            {
+                                <span class="muted">&middot; recognised from &ldquo;@reply.Reason&rdquo;</span>
+                            }
+                        </div>
+                    </li>
+                }
+            </ul>
+            @if (Model.Replies.Count > Shown)
+            {
+                <p class="muted small">@(Model.Replies.Count - Shown) older repl@(Model.Replies.Count - Shown == 1 ? "y is" : "ies are") not shown.</p>
+            }
+        }
+        else
+        {
+            <p class="muted">
+                No replies yet. @Model.ApplicationCount application@(Model.ApplicationCount == 1 ? " is" : "s are") being watched; an answer shows up here
+                as soon as it reaches your mailbox (checked every 30 minutes, or press <em>Check now</em>).
+            </p>
+        }
+    </section>
+}

@@ -28,6 +28,15 @@ public sealed class AppPaths
     public string AccountsFile => Path.Combine(Root, "accounts.json");
     public string ApplicationsFile => Path.Combine(Root, "applications.json");
 
+    /// <summary>The Gmail client id/secret and refresh token, encrypted for this Windows user (DPAPI).</summary>
+    public string GmailVaultFile => Path.Combine(Root, "gmail.dat");
+
+    /// <summary>Employer replies found in Gmail (sender, subject, short snippet, classification).</summary>
+    public string RepliesFile => Path.Combine(Root, "replies.json");
+
+    /// <summary>When Gmail was last checked and which messages have already been looked at.</summary>
+    public string MailStateFile => Path.Combine(Root, "mail-state.json");
+
     public string DefaultAccountsDocument =>
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "JobApplier-Accounts.docx");
 

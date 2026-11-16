@@ -52,6 +52,11 @@
     </form>
 </section>
 
+<div id="replies" data-poll-url="@Url.Action("Replies", "Gmail")" data-poll-ms="60000"
+     data-check-url="@Url.Action("Check", "Gmail")" data-dismiss-url="@Url.Action("Dismiss", "Gmail")">
+    @await Html.PartialAsync("_Replies", Model.Replies)
+</div>
+
 <div id="live" data-poll-url="@Url.Action("Live", "Home")" data-poll-ms="2500">
     @await Html.PartialAsync("_Live", Model.Live)
 </div>

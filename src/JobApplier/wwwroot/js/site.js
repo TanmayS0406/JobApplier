@@ -28,7 +28,9 @@
                 const html = await response.text();
                 if (userIsTyping()) return; // started typing while the request was in flight
                 el.innerHTML = html;
-                reflectHelpCount(Number(response.headers.get('X-Help-Count') ?? 0));
+                // Only the live job list reports a help count; other polled areas (the replies card) must not reset the tab title.
+                const helpCount = response.headers.get('X-Help-Count');
+                if (helpCount !== null) reflectHelpCount(Number(helpCount));
                 if (el.querySelector('[data-terminal="true"]')) clearInterval(timer);
             } catch {
                 // server restarting or offline: try again on the next tick
@@ -149,9 +151,15 @@
             else if (s.loggedIn) { text.textContent = 'Signed in' + (s.detail ? ' as ' + s.detail : '') + (s.plan ? ' - ' + s.plan + ' plan' : ''); stopWaiting(); }
             else if (!waiting) text.textContent = 'Not signed in.';
             signIn.disabled = !s.cliFound || s.loggedIn;
-            signOut.disabled = !s.loggedIn;
+            // Gemini says where the sign-in comes from; only a Google login can be "signed out" (a key has its own Remove button).
+            signOut.disabled = s.source !== undefined ? s.source !== 'google' : !s.loggedIn;
+            const install = document.getElementById(prefix + '-install');
+            if (install) install.hidden = s.cliFound;
+            const removeKey = document.getElementById(prefix + '-key-remove');
+            if (removeKey) removeKey.disabled = s.source !== 'api-key-file';
             refreshPill(force);
         }
+        account.addEventListener('account-refresh', () => refresh(true));
         function stopWaiting() { if (waiting) { clearInterval(waiting); waiting = null; } }
 
         async function post(url) {
@@ -162,7 +170,9 @@
         signIn.addEventListener('click', async () => {
             const result = await post(account.dataset.signinUrl);
             if (!result.ok) { text.textContent = result.error; return; }
-            text.textContent = 'Finish signing in in the browser and the console window that just opened...';
+            text.textContent = account.dataset.provider === 'Gemini'
+                ? "In the window that just opened, press Enter on 'Login with Google', then choose your account in the browser. This page updates by itself."
+                : 'Finish signing in in the browser and the console window that just opened...';
             waiting = setInterval(() => refresh(true), 3000);
             setTimeout(stopWaiting, 10 * 60 * 1000);
         });
@@ -175,6 +185,198 @@
     }
     setupAccountCard('claude');
     setupAccountCard('gemini');
+
+    // ---------- Gemini: install the CLI, save / remove an API key ----------
+    (function setupGeminiExtras() {
+        const account = document.getElementById('gemini-account');
+        if (!account) return;
+        const $ = id => document.getElementById(id);
+        const refresh = () => account.dispatchEvent(new Event('account-refresh'));
+        const post = async (url, body) => (await fetch(url, { method: 'POST', headers: { RequestVerificationToken: csrf }, body })).json();
+
+        $('gemini-install-btn').addEventListener('click', async () => {
+            const button = $('gemini-install-btn'), msg = $('gemini-install-msg');
+            button.disabled = true;
+            msg.textContent = 'Opening the install window...';
+            try {
+                const result = await post(account.dataset.installUrl);
+                if (!result.ok) { msg.textContent = result.error; button.disabled = false; return; }
+            } catch { msg.textContent = 'Could not reach the app.'; button.disabled = false; return; }
+
+            msg.textContent = 'Installing - this page updates by itself when it is done.';
+            const timer = setInterval(async () => {
+                const status = await fetchStatus(account.dataset.statusUrl, true);
+                if (status && status.cliFound) { clearInterval(timer); msg.textContent = 'Installed.'; refresh(); }
+            }, 3000);
+            setTimeout(() => { clearInterval(timer); button.disabled = false; }, 10 * 60 * 1000);
+        });
+
+        $('gemini-key-save').addEventListener('click', async () => {
+            const input = $('gemini-key'), msg = $('gemini-key-msg'), button = $('gemini-key-save');
+            const key = input.value.trim();
+            if (!key) { msg.textContent = 'Paste your API key first.'; input.focus(); return; }
+
+            button.disabled = true;
+            msg.textContent = 'Checking the key with Google...';
+            try {
+                const data = new FormData();
+                data.append('key', key);
+                const result = await post(account.dataset.savekeyUrl, data);
+                msg.textContent = result.message;
+                if (result.ok) input.value = '';
+            } catch { msg.textContent = 'Could not reach the app.'; }
+            button.disabled = false;
+            refresh();
+        });
+
+        $('gemini-key-remove').addEventListener('click', async () => {
+            const result = await post(account.dataset.removekeyUrl);
+            $('gemini-key-msg').textContent = result.message || 'The saved key was removed.';
+            refresh();
+        });
+    })();
+
+    // ---------- Gmail: Settings card ----------
+    (function setupGmail() {
+        const account = document.getElementById('gmail-account');
+        if (!account) return;
+        const $ = id => document.getElementById(id);
+        const post = async (url, body) => (await fetch(url, { method: 'POST', headers: { RequestVerificationToken: csrf }, body })).json();
+        const when = iso => (iso ? new Date(iso).toLocaleString() : '');
+        let status = null;
+
+        async function refresh() {
+            try {
+                status = await (await fetch(account.dataset.statusUrl, { cache: 'no-store' })).json();
+            } catch { return; }
+            const s = status;
+
+            let text;
+            if (s.connected) {
+                text = 'Connected' + (s.email ? ' as ' + s.email : '') + (s.connectedUtc ? ' since ' + when(s.connectedUtc) : '') + '. '
+                    + (s.checking ? 'Looking through the mailbox now...'
+                        : (s.lastCheckedUtc ? 'Last checked ' + when(s.lastCheckedUtc) + '. ' : 'Not checked yet. ')
+                        + s.replyCount + ' repl' + (s.replyCount === 1 ? 'y' : 'ies') + ' found so far.');
+                if (s.lastError) text += ' The last check failed: ' + s.lastError;
+            } else if (s.needsReconnect) {
+                text = 'The connection ended (Google ends it after 7 days while the consent screen is in "Testing", or when access was removed). Press Connect Gmail to sign in again.';
+            } else if (s.hasClient) {
+                text = 'Google client saved (' + s.clientHint + '). Press Connect Gmail.';
+            } else {
+                text = 'Not connected. Do step 1, then press Save client.';
+            }
+            $('gmail-text').textContent = text;
+
+            const chip = $('gmail-chip');
+            chip.hidden = !(s.connected || s.needsReconnect);
+            chip.textContent = s.connected ? 'connected' : 'expired';
+            chip.className = 'chip ' + (s.connected ? 'chip-good' : 'chip-gap');
+
+            $('gmail-client-id').placeholder = s.hasClient ? 'saved: ' + s.clientHint + ' (paste a new one to replace it)' : 'Client ID (…apps.googleusercontent.com)';
+            $('gmail-client-secret').placeholder = s.hasClient ? 'saved (leave empty to keep it)' : 'Client secret';
+            $('gmail-connect').disabled = !s.hasClient || s.connected;
+            $('gmail-connect').textContent = s.needsReconnect ? 'Connect Gmail again' : 'Connect Gmail';
+            $('gmail-check').disabled = !s.connected || s.checking;
+            $('gmail-rescan').disabled = !s.connected || s.checking;
+            $('gmail-disconnect').disabled = !s.connected && !s.needsReconnect;
+            $('gmail-remove').disabled = !s.hasClient;
+            $('gmail-clear').disabled = s.replyCount === 0;
+        }
+
+        // A busy button shows what it is doing; the message line keeps the result.
+        async function run(button, message, work) {
+            const msg = $('gmail-msg');
+            button.disabled = true;
+            msg.textContent = message;
+            try {
+                await work(msg);
+            } catch {
+                msg.textContent = 'Could not reach the app. Is it still running?';
+            }
+            await refresh();
+        }
+
+        $('gmail-save').addEventListener('click', async () => {
+            const msg = $('gmail-client-msg'), button = $('gmail-save');
+            const data = new FormData();
+            data.append('clientId', $('gmail-client-id').value);
+            data.append('clientSecret', $('gmail-client-secret').value);
+            button.disabled = true;
+            try {
+                const result = await post(account.dataset.saveclientUrl, data);
+                msg.textContent = result.message;
+                if (result.ok) { $('gmail-client-id').value = ''; $('gmail-client-secret').value = ''; }
+            } catch { msg.textContent = 'Could not reach the app.'; }
+            button.disabled = false;
+            await refresh();
+        });
+
+        $('gmail-connect').addEventListener('click', () => run($('gmail-connect'), 'Opening Google...', async (msg) => {
+            const result = await post(account.dataset.connectUrl);
+            if (!result.ok) { msg.textContent = result.error; return; }
+            // location.assign, not a form post: the Content-Security-Policy (form-action 'self') would also block the redirect to Google.
+            location.assign(result.url);
+        }));
+
+        const check = (rescan) => async (msg) => {
+            const data = new FormData();
+            data.append('rescan', rescan ? 'true' : 'false');
+            const result = await post(account.dataset.checkUrl, data);
+            msg.textContent = result.message;
+        };
+        $('gmail-check').addEventListener('click', () => run($('gmail-check'), 'Looking through your mailbox... the first time this can take a minute.', check(false)));
+        $('gmail-rescan').addEventListener('click', () => run($('gmail-rescan'), 'Reading the mailbox again...', check(true)));
+
+        $('gmail-disconnect').addEventListener('click', () => run($('gmail-disconnect'), 'Disconnecting...', async (msg) => {
+            msg.textContent = (await post(account.dataset.disconnectUrl)).message;
+        }));
+        $('gmail-remove').addEventListener('click', () => {
+            if (!confirm('Disconnect Gmail and delete the saved Client ID and secret? You will have to paste them again to reconnect.')) return;
+            return run($('gmail-remove'), 'Removing...', async (msg) => {
+                msg.textContent = (await post(account.dataset.removeclientUrl)).message;
+            });
+        });
+        $('gmail-clear').addEventListener('click', () => {
+            if (!confirm('Delete every saved reply? Your mailbox is not touched; the next check finds the replies again.')) return;
+            return run($('gmail-clear'), 'Deleting...', async (msg) => {
+                msg.textContent = (await post(account.dataset.clearUrl)).message;
+            });
+        });
+
+        refresh();
+        setInterval(() => { if (!document.hidden) refresh(); }, 15000);
+    })();
+
+    // ---------- Gmail: replies card on the dashboard (it is re-rendered by polling, so clicks are handled on the document) ----------
+    document.addEventListener('click', async (event) => {
+        const area = document.getElementById('replies');
+        if (!area || !(event.target instanceof Element)) return;
+
+        const redraw = async () => {
+            const r = await fetch(area.dataset.pollUrl, { cache: 'no-store' });
+            if (r.ok) area.innerHTML = await r.text();
+        };
+
+        const checkButton = event.target.closest('[data-gmail-check]');
+        if (checkButton && area.contains(checkButton)) {
+            checkButton.disabled = true;
+            checkButton.textContent = 'Checking...';
+            try {
+                await fetch(area.dataset.checkUrl, { method: 'POST', headers: { RequestVerificationToken: csrf } });
+            } catch { /* the card shows the state again below */ }
+            await redraw();
+            return;
+        }
+
+        const dismissButton = event.target.closest('[data-reply-dismiss]');
+        if (dismissButton && area.contains(dismissButton)) {
+            dismissButton.disabled = true;
+            try {
+                await fetch(`${area.dataset.dismissUrl}/${encodeURIComponent(dismissButton.dataset.replyDismiss)}`, { method: 'POST', headers: { RequestVerificationToken: csrf } });
+            } catch { /* redrawn below */ }
+            await redraw();
+        }
+    });
 
     // ---------- Upload: drag & drop, paste, previews ----------
     const dropzone = document.getElementById('dropzone');

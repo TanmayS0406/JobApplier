@@ -33,7 +33,7 @@ Anything only a person can do (CAPTCHA, e-mail verification, a question your pro
 that one job and asks you in the dashboard, while the other jobs keep running.
 
 Built with the **Microsoft Agent Framework**, **Claude** (signed in with OAuth through the Claude Code CLI - no API key) or
-**Gemini** (through Google's Gemini CLI: *Login with Google*, or an API key in your environment) and the **Playwright MCP**
+**Gemini** (through Google's Gemini CLI: paste a free API key, or *Login with Google*) and the **Playwright MCP**
 server.
 
 ## Requirements
@@ -44,7 +44,7 @@ server.
 | Node.js 18+ | runs `npx @playwright/mcp` |
 | Google Chrome (or Edge) | the browser the agent drives |
 | Claude Code CLI | <https://claude.com/claude-code> - needs a Claude Pro / Max / Team / Enterprise login |
-| *or* Gemini CLI | `npm install -g @google/gemini-cli` - needs a Google login, or `GEMINI_API_KEY` set in your environment |
+| *or* Gemini CLI | installed with one click from Settings (or `npm install -g @google/gemini-cli`) - then paste a Gemini API key or sign in with Google |
 
 ## Run it
 
@@ -57,7 +57,7 @@ It listens on <http://127.0.0.1:5189> only (never on the network) and opens your
 First run:
 
 1. **Settings -> pick the AI provider and sign in.** *Sign in with Claude* runs the CLI's own OAuth flow (`claude auth login`);
-   *Sign in with Google* opens the Gemini CLI in a console window where you choose *Login with Google*. JobApplier never sees
+   For Gemini the quickest way is to paste an API key (see below); *Sign in with Google* is the alternative. JobApplier never sees
    your credentials. Already signed in to Claude Code or Gemini? It is picked up automatically. The header shows the status of
    the provider in use.
 2. **Profile -> upload your resume** (PDF, Word, text or image). Claude reads it into the form: name, **e-mail** (used for every
@@ -88,6 +88,16 @@ fill the form and ask you for help in the same way, and both are signed in with 
 * **Tools.** Each Gemini agent gets one built-in tool, a read-only file reader confined to the job's workspace; shell, file
   writing and web tools are refused. Its MCP servers (the browser and this app) come from a settings file in the job's private
   folder, passed through `GEMINI_CLI_SYSTEM_SETTINGS_PATH`, so the app's token is never inside the agent's reach.
+* **Signing in to Gemini is three clicks at most.** In *Settings -> Gemini account*:
+  1. **Install Gemini CLI** (only shown when it is missing) opens a window that runs `npm install -g @google/gemini-cli`; the page
+     notices when it is done.
+  2. **Option A - paste an API key** (quickest): create a free key at <https://aistudio.google.com/apikey>, paste it and press *Save key*.
+     The app first asks Google whether the key works (so a typo is caught immediately, and a refused key is never saved), then
+     saves it as `GEMINI_API_KEY` in `~/.gemini/.env`, the file the Gemini CLI itself reads, so the CLI works the same outside this
+     app. It is shown masked (`AIza...ghij`) and *Remove saved key* deletes it. If Google cannot be reached the key is saved
+     with a note that it was not checked.
+  3. **Option B - sign in with Google**: opens the Gemini CLI; press Enter on *Login with Google*, choose your account in the
+     browser, and the app closes that window by itself once the login has landed (no `/quit`).
 * **Sign-in state.** Gemini has no "who am I" command: the app shows *signed in* when a cached Google login or an API key variable
   exists. An expired login shows up as a clear error on the first job. *Sign out* removes the cached Google login; an API key in
   the environment is left alone.
@@ -182,6 +192,42 @@ It is rebuilt from `accounts.json` and `applications.json` on every change, so i
 
 **It contains passwords in plain text.** Keep it private (or move it somewhere encrypted).
 
+## Gmail replies
+
+Connect your Gmail (*Settings -> Gmail replies*) and the dashboard shows **which employers answered** each application, and what they
+said: **received**, **moving forward** (interview, call, assessment, next steps), **info requested**, **rejected** or **offer**. Each
+job row gets a chip with its latest answer, and the *Replies from employers* card lists the mails with a link that opens each in Gmail.
+The mailbox is checked every 30 minutes while the app runs, or when you press *Check now*.
+
+**One-time setup (about 3 minutes).** Google needs to know which app is asking for your mail, and the app is yours, so you create it:
+
+1. In the [Google Cloud Console](https://console.cloud.google.com/projectcreate) create a project (any name).
+2. Enable the [Gmail API](https://console.cloud.google.com/apis/library/gmail.googleapis.com).
+3. In the [Google Auth Platform](https://console.cloud.google.com/auth/overview) choose audience *External*, give it a name, and add
+   **your own Gmail address** under *Test users*.
+4. Create an *OAuth client ID* of type **Desktop app** and paste its Client ID and Client secret into Settings, then press
+   *Connect Gmail*. (With a *Web application* client, add the redirect URI that Settings shows.)
+
+Google shows *"Google hasn't verified this app"* because the app is your own: press *Advanced*, then *Go to ... (unsafe)*.
+**While the consent screen is in *Testing*, Google ends the sign-in after 7 days**; the dashboard and Settings then say so and one
+click on *Connect Gmail* fixes it.
+
+How it stays safe and private:
+
+* **Read-only**: only the `gmail.readonly` scope is requested, so the app cannot send, delete or change anything. Sign-in uses
+  OAuth 2.0 with PKCE and a single-use `state`; the return address is this app's own `127.0.0.1` page.
+* **Nothing leaves this PC except calls to Google.** Mail is read and classified locally by phrase rules (English and Spanish), not by
+  an AI, so no mail text goes to Claude or Gemini. Most mail is dismissed from its sender, subject and date alone; only a message that
+  could be an answer is opened in full. Only the sender, subject, a short snippet and the verdict are saved (`replies.json`).
+* Your Client ID, secret and sign-in are stored **encrypted with Windows DPAPI** for your Windows user (`gmail.dat`), so the file is
+  useless on another PC or account. *Disconnect* tells Google to revoke the grant and deletes it.
+
+Limits to know about: the classification is heuristic. A rejection that also invites you to something is shown with a *check* tag; a mail
+that could not be recognised is shown as *Reply*; and a mail from a recruiting system that does not name the company cannot be matched.
+*Not about this job* removes a wrong match for good, and *Read old mail again* (Settings -> More) re-reads the mailbox after a
+fix. Replies are matched to applications by company name in the sender, subject or (for recruiting-looking mail) the text, plus the
+role - so applying to several roles at one company is handled by the role words.
+
 ## Settings
 
 | Setting | Meaning |
@@ -202,6 +248,8 @@ It is rebuilt from `accounts.json` and `applications.json` on every change, so i
 
 ```
 settings.json  profile.json  accounts.json  applications.json
+gmail.dat                    Gmail client + sign-in, encrypted with Windows DPAPI (only if you connect Gmail)
+replies.json  mail-state.json   employer replies found in Gmail, and which messages were already looked at
 resume/                      your resume copy
 jobs/<id>/job.json           the job: results, log (passwords never included)
 jobs/<id>/screenshot.*       the uploaded image
@@ -221,11 +269,13 @@ jobs/<id>/private/           MCP config + secrets file - outside the workspace, 
 * **Your resume and profile are sent to the AI provider you selected (Anthropic for Claude, Google for Gemini)** because the agent
   needs them to fill forms and score fit. Nothing is sent anywhere else.
 * The job log shows what the agent *did* ("typed into *Password field*"), never what it typed.
+* Gmail (optional) is read-only and read on this PC only - see *Gmail replies* above. The mail checker never talks to the AI agent,
+  and the Gmail client secret and tokens are never logged or sent back to the page.
 
 ## Things to know
 
-* **E-mail verification:** the agent cannot read your inbox. When a site sends a code or link it asks you to do it in the browser
-  window, then continues.
+* **E-mail verification:** the agent cannot read your inbox (the optional Gmail connection is only for showing you replies, and is
+  not available to the agent). When a site sends a code or link it asks you to do it in the browser window, then continues.
 * **Not every site works.** Standard forms on Greenhouse, Lever, Ashby, SmartRecruiters and many company sites do; heavily
   customised portals, "Easy Apply inside LinkedIn", or sites that block automation may need your help or fail. A failed job keeps its
   log, so you can see how far it got.
@@ -241,6 +291,8 @@ src/JobApplier/
   Agents/     Prompts, AgentFactory, JobWorkflow (the four stages as Agent Framework executors)
   Claude/     CliAgent (the shared AIAgent base), ClaudeCodeAgent + ClaudeCli, GeminiCliAgent + GeminiCli + GeminiStream
               (decoder, settings file), tool-activity log lines
+  Mail/       Gmail: GoogleOAuthClient (OAuth + PKCE), GmailConnection (DPAPI vault), GmailApi (read-only REST), ReplyMatcher +
+              ReplyClassifier (which application, what it says), MailChecker + MailWatcher, ReplyStore
   Mcp/        JobMcpServer - wait_for_user, record_account, report_progress
   Services/   JobRunner (queue, usage-limit hold + auto-retry), JobStore, HumanHelpBroker, AccountService + AccountsDocument (.docx),
               ProfileService/Importer, Claude/GeminiAccountService, ...
@@ -256,7 +308,13 @@ dotnet test
 
 The unit tests cover password generation and redaction, the stream parser, the MCP protocol, the help broker, the Word document
 writer, account reuse, the duplicate guard, the JSON schemas the CLI accepts, and how the Agent Framework routes messages
-between stages.
+between stages. The Gmail part is covered against a fake Google (OAuth/PKCE, the encrypted vault, token refresh and expiry, Gmail
+parsing, matching mail to applications, classifying wording such as "if you are selected..." versus a real invitation, and the
+checker end to end).
+
+The Gmail pages were also driven in a real browser (Settings card, the redirect to Google's consent page under the CSP, a forged
+callback, the replies card). What has **not** been tested is a live sign-in against a real Google account, because that needs your
+own Google client.
 
 The whole pipeline was also checked live against the real Claude CLI, a real browser and a local fake company portal (CAPTCHA
 wall, sign-up with a password policy, file upload, a question the profile could not answer, a review gate): three jobs in

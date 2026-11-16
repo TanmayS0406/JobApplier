@@ -106,6 +106,11 @@
                             </td>
                             <td>
                                 <span class="chip status-@row.Status.ToString().ToLowerInvariant()">@row.Status.Label()</span>
+                                @if (Model.Replies.TryGetValue(row.Id, out var reply))
+                                {
+                                    <a class="chip @reply.Kind.Css()" href="#replies"
+                                       title="Latest mail from the employer: @reply.Subject">@(reply.Kind == ReplyKind.Acknowledged ? "mail: received" : reply.Kind.Label())@(reply.Confident ? "" : "?")</a>
+                                }
                                 @if (row.NeedsUser)
                                 {
                                     <span class="chip chip-alert">needs you</span>
