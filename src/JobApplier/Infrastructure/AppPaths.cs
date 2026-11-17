@@ -37,6 +37,9 @@ public sealed class AppPaths
     /// <summary>When Gmail was last checked and which messages have already been looked at.</summary>
     public string MailStateFile => Path.Combine(Root, "mail-state.json");
 
+    /// <summary>The resume coach's last advice (Insights page).</summary>
+    public string AdviceFile => Path.Combine(Root, "resume-advice.json");
+
     public string DefaultAccountsDocument =>
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "JobApplier-Accounts.docx");
 

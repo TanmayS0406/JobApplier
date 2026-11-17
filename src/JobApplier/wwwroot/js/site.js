@@ -120,6 +120,35 @@
         try { await redrawArea(area); } catch { /* the next poll will try again */ }
     });
 
+    // A select that applies itself: the Insights threshold.
+    document.addEventListener('change', (event) => {
+        const select = event.target instanceof Element ? event.target.closest('[data-auto-submit]') : null;
+        if (select?.form) select.form.submit();
+    });
+
+    // ---------- Insights: ask the coach, then follow the run until it is done ----------
+    document.addEventListener('click', async (event) => {
+        const button = event.target instanceof Element ? event.target.closest('[data-coach-start]') : null;
+        const area = button?.closest('[data-poll-url]');
+        if (!button || !area || button.disabled) return;
+
+        button.disabled = true;
+        try {
+            const response = await fetch(button.dataset.coachStart, { method: 'POST', headers: { 'X-Requested-With': 'fetch', RequestVerificationToken: csrf } });
+            const answer = await response.json();
+            if (!answer.ok) alert(answer.message);
+        } catch {
+            alert('That did not work: the app could not be reached. Is it still running?');
+        }
+
+        const deadline = Date.now() + 15 * 60 * 1000;
+        const follow = async () => {
+            try { await redrawArea(area); } catch { /* try again */ }
+            if (area.querySelector('[data-coach-running]') && Date.now() < deadline) setTimeout(follow, 3000);
+        };
+        follow();
+    });
+
     // ---------- Retry dialog: submit automatically / the lowest match worth applying for ----------
     // Any button with data-retry-open opens the one dialog (placed outside the areas that refresh themselves) and tells it where to post,
     // what to call itself and which values to start from (data-retry-auto / data-retry-min; without them the dialog's own defaults).

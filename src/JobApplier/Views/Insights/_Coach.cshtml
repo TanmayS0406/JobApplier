@@ -1,0 +1,73 @@
+@using JobApplier.Controllers
+@using JobApplier.Insights
+@model CoachViewModel
+@{
+    var s = Model.Status;
+    var advice = s.Advice;
+}
+@if (!s.Running) { <span hidden data-terminal="true"></span> }
+<div class="card-head">
+    <h2>Claude's advice on your resume</h2>
+    @if (!s.Running)
+    {
+        <button type="button" class="btn" data-coach-start="@Url.Action("StartCoach", "Insights", new { t = Model.Threshold })" disabled="@(!Model.HasResume)">
+            @(advice == null ? "Ask Claude" : "Ask again")
+        </button>
+    }
+</div>
+<p class="muted small">
+    Pressing the button sends your resume text and the skills above to the AI provider you chose in Settings. Claude may only suggest what your resume already
+    supports; anything else is listed as something to learn first. Never add a skill to your resume that is not true.
+</p>
+
+@if (s.Running)
+{
+    <div class="banner banner-ok" data-coach-running="true">Claude is reading your resume... this takes a minute or two.</div>
+}
+@if (s.Error.Length > 0)
+{
+    <div class="banner banner-error">@s.Error</div>
+}
+@if (advice != null)
+{
+    @if (s.Stale)
+    {
+        <div class="banner banner-warn">Your jobs or resume changed since this advice was written. Ask again to refresh it.</div>
+    }
+    @if (advice.Summary.Length > 0) { <p>@advice.Summary</p> }
+
+    @foreach (var group in advice.Changes.GroupBy(c => c.Verdict))
+    {
+        <h3>
+            @(group.Key switch
+            {
+                CoachVerdict.ShowIt => "Show these: your resume already supports them",
+                CoachVerdict.LearnIt => "Learn these first: nothing in your resume backs them yet",
+                _ => "Not worth it"
+            })
+        </h3>
+        @foreach (var c in group)
+        {
+            <div class="qa">
+                <strong>@c.Skill</strong>
+                <span class="muted small">@c.JobsMissingIt jobs miss it@(c.NewlyRelevant > 0 ? $", +{c.NewlyRelevant} would become relevant" : "")</span>
+                @if (c.Wording.Length > 0)
+                {
+                    <p>@(c.Section.Length > 0 ? c.Section + ": " : "")<em>@c.Wording</em></p>
+                    <p class="muted small">Your resume says: "@c.Evidence"</p>
+                }
+                @if (c.Reason.Length > 0) { <p class="small">@c.Reason</p> }
+                @if (c.Note.Length > 0) { <p class="muted small">@c.Note</p> }
+            </div>
+        }
+    }
+    @if (advice.Dropped > 0)
+    {
+        <p class="muted small">@advice.Dropped suggestion@(advice.Dropped == 1 ? " was" : "s were") ignored because @(advice.Dropped == 1 ? "it was" : "they were") not about a skill from the list.</p>
+    }
+    <p class="muted small">Written @advice.CreatedUtc.ToLocalTime().ToString("g") for a @advice.Threshold% threshold.</p>
+}
+else if (!s.Running && s.Error.Length == 0)
+{
+    <p class="muted">No advice yet.</p>
+}

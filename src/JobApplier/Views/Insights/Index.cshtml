@@ -1,0 +1,165 @@
+@using JobApplier.Controllers
+@using JobApplier.Insights
+@model InsightsViewModel
+@{
+    ViewData["Title"] = "Insights";
+    var r = Model.Report;
+}
+
+<section class="card">
+    <div class="card-head">
+        <h2>What should my resume say?</h2>
+        <form method="get" asp-action="Index" class="inline">
+            <label>A job is relevant from
+                <select name="t" data-auto-submit>
+                    @foreach (var t in Model.Thresholds)
+                    {
+                        <option value="@t" selected="@(t == Model.Threshold)">@t% match</option>
+                    }
+                </select>
+            </label>
+        </form>
+    </div>
+    <p class="muted">
+        Looks at every job that has a match score and finds the skills missing from your resume that hold back the most jobs. Nothing leaves this computer
+        for this part. The Claude advice below is only asked for when you press its button.
+    </p>
+
+    @if (!Model.HasResume)
+    {
+        <div class="banner banner-warn">Add your resume on the <a asp-controller="Profile" asp-action="Index">Profile page</a> to compare it with the jobs.</div>
+    }
+    @foreach (var note in r.Notes)
+    {
+        <div class="banner banner-warn">@note</div>
+    }
+</section>
+
+@if (!r.HasData)
+{
+    <section class="card"><p class="muted">No scored jobs with skill lists yet. Add job screenshots on the <a asp-controller="Home" asp-action="Index">Dashboard</a>; they are scored against your resume first.</p></section>
+    return;
+}
+
+<section class="card">
+    <h2>Where you stand</h2>
+    <p>
+        <span class="match-big">@r.RelevantNow of @r.ScoredJobs</span> scored jobs reach @r.Threshold% (average match @r.AveragePercent.ToString("0")%).
+        Adding the changes below is expected to lift that to about <strong>@r.Projection.Expected</strong>
+        (likely range @r.Projection.Low to @r.Projection.High).
+    </p>
+    <details>
+        <summary class="muted">How this was calculated, and what it cannot tell you</summary>
+        <ul class="small">
+            <li><strong>Skill gaps.</strong> The "missing skills" lists from each job's match are counted, with different wordings of one skill (K8s, Kubernetes) merged.</li>
+            <li><strong>Points per skill.</strong> @r.Calibration.Note</li>
+            <li><strong>The plan</strong> is chosen greedily: each step adds the skill that lifts the most jobs over @r.Threshold%. That is a good approximation, not a proven optimum, and the range comes from a Monte Carlo simulation of the uncertainty in the estimate.</li>
+            <li><strong>Job families and keywords</strong> come from a TF-IDF text model and K-Means clustering (ML.NET) over the posting texts that are in your resume's language@(r.TextAgreement is { } a ? $". The text similarity agrees only weakly with Claude's match scores (correlation {a:0.00}), so treat them as hints, not scores" : "").</li>
+            <li>It describes the jobs you already collected, not the whole market, and it cannot tell whether a skill is true for you. Only add what you can honestly back up.</li>
+        </ul>
+    </details>
+</section>
+
+<section class="card">
+    <h2>What to change first</h2>
+    @if (r.Recommendations.Count == 0)
+    {
+        <p class="muted">No missing skill stands out.</p>
+    }
+    else
+    {
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>#</th><th>Skill</th><th>Jobs missing it</th><th>Newly relevant</th><th>Relevant after</th><th>Avg. points</th></tr></thead>
+                <tbody>
+                @foreach (var rec in r.Recommendations)
+                {
+                    <tr>
+                        <td>@rec.Rank</td>
+                        <td>
+                            <strong>@rec.Skill</strong>
+                            @if (rec.InResumeText) { <span class="chip chip-good" title="Your resume text already uses these words; the match may need clearer wording, not a new skill.">already in text</span> }
+                            @if (rec.Variants.Count > 1) { <div class="muted small">also: @string.Join("; ", rec.Variants.Skip(1).Take(3))</div> }
+                        </td>
+                        <td>@rec.JobsMissingIt</td>
+                        <td>+@rec.NewlyRelevant</td>
+                        <td>@rec.TotalRelevant</td>
+                        <td>+@rec.AveragePoints.ToString("0.0")</td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+        </div>
+    }
+</section>
+
+<section id="coach" class="card" data-poll-url="@Url.Action("Coach", "Insights", new { t = Model.Threshold })" data-poll-ms="4000">
+    @await Html.PartialAsync("_Coach", Model.Coach)
+</section>
+
+<section class="card">
+    <h2>Skills missing most often</h2>
+    <div class="table-wrap">
+        <table>
+            <thead><tr><th>Skill</th><th>Jobs</th><th>Share</th><th>Avg. match of those jobs</th></tr></thead>
+            <tbody>
+            @foreach (var g in r.Gaps.Where(g => g.Addable).Take(15))
+            {
+                <tr>
+                    <td>@g.Skill @if (g.InResumeText) { <span class="chip chip-good">already in text</span> }</td>
+                    <td>@g.Jobs</td>
+                    <td><meter min="0" max="1" value="@g.Share.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture)"></meter> @((g.Share * 100).ToString("0"))%</td>
+                    <td>@g.AveragePercent.ToString("0")%</td>
+                </tr>
+            }
+            </tbody>
+        </table>
+    </div>
+    @{ var other = r.Gaps.Where(g => !g.Addable).Take(8).ToList(); }
+    @if (other.Count > 0)
+    {
+        <p class="muted small">
+            Not things a resume can add: @string.Join(", ", other.Select(g => $"{g.Skill} ({g.Jobs})")).
+            Soft skills and requirements about you (work permit, location) are kept out of the plan.
+        </p>
+    }
+</section>
+
+@if (r.Families.Count > 0)
+{
+    <section class="card">
+        <h2>Kinds of jobs you collected</h2>
+        <p class="muted small">Grouped by what their postings talk about (K-Means on TF-IDF). Names are the words that set each group apart.</p>
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Group</th><th>Jobs</th><th>Avg. match</th><th>Relevant</th><th>Most missing</th></tr></thead>
+                <tbody>
+                @foreach (var f in r.Families)
+                {
+                    <tr>
+                        <td>@string.Join(", ", f.TopTerms.Take(4))</td>
+                        <td>@f.Jobs</td>
+                        <td>@f.AveragePercent.ToString("0")%</td>
+                        <td>@f.Relevant</td>
+                        <td>@string.Join(", ", f.TopGaps.Take(3).Select(g => g.Skill))</td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+        </div>
+    </section>
+}
+
+@if (r.Keywords.Count > 0)
+{
+    <section class="card">
+        <h2>Words the postings use and your resume does not</h2>
+        <p class="muted small">Useful when a company filters resumes by keyword. Only worth using where they describe something you really did.</p>
+        <div class="chips">
+            @foreach (var k in r.Keywords)
+            {
+                <span class="chip">@k.Term <span class="muted">(@k.Jobs)</span></span>
+            }
+        </div>
+    </section>
+}

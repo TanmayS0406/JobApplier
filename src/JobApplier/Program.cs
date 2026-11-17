@@ -3,6 +3,7 @@ using System.Text.Json.Nodes;
 using JobApplier.Agents;
 using JobApplier.Claude;
 using JobApplier.Infrastructure;
+using JobApplier.Insights;
 using JobApplier.Mail;
 using JobApplier.Mcp;
 using JobApplier.Services;
@@ -44,6 +45,11 @@ builder.Services.AddSingleton<JobMcpServer>();
 builder.Services.AddSingleton<McpEndpointInfo>();
 builder.Services.AddSingleton<AgentFactory>();
 builder.Services.AddSingleton<ProfileImporter>();
+
+// Resume gap analysis (ML.NET text model, Math.NET statistics) and, on request, Claude's advice on it.
+builder.Services.AddSingleton<GapAnalysisService>();
+builder.Services.AddSingleton<ICoachRunner, AgentCoachRunner>();
+builder.Services.AddSingleton<ResumeCoachService>();
 // The runner is built from the pipeline services, so the pipeline reaches it through a delegate resolved on first use.
 builder.Services.AddSingleton(sp => new PipelineServices(
     sp.GetRequiredService<AgentFactory>(),

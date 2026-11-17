@@ -270,3 +270,7 @@ a.chip:hover { text-decoration: none; border-color: var(--accent); }
 .retry-dialog h2 { margin: 0 0 .4rem; }
 .retry-dialog .options { margin-top: .9rem; }
 .retry-dialog input[type=number] { width: 5rem; }
+
+/* Insights */
+.card meter { width: 90px; height: 0.8em; vertical-align: middle; }
+.card h3 { margin: 1rem 0 0.4rem; font-size: 1rem; }
