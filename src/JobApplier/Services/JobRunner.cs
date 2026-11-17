@@ -67,7 +67,7 @@ public sealed class JobRunner : BackgroundService
     /// cancels any "retry when available" that was armed; one the runner makes by itself (<paramref name="automatic"/>) keeps it,
     /// so the job is picked up again if the limit is still in force.
     /// </summary>
-    public bool Retry(Guid jobId, bool applyAnyway = false, bool automatic = false)
+    public bool Retry(Guid jobId, bool applyAnyway = false, bool automatic = false, RetryOptions? options = null)
     {
         var status = _store.Read(jobId, r => r.Status);
         if (!status.IsTerminal() || status == JobStatus.Applied) return false; // never submit a second application
@@ -80,7 +80,12 @@ public sealed class JobRunner : BackgroundService
                 r.Match = null;   // ... and score again from the real description
             }
             r.Apply = null;
-            if (applyAnyway) r.Options.MinMatchPercent = 0;
+            if (options != null)
+            {
+                r.Options.AutoSubmit = options.AutoSubmit;
+                r.Options.MinMatchPercent = options.MinMatchPercent;
+            }
+            if (applyAnyway) r.Options.MinMatchPercent = 0;   // "apply anyway" is explicit and wins over a minimum
 
             r.LimitHit = false;
             r.RetryAfterUtc = null;
@@ -91,7 +96,8 @@ public sealed class JobRunner : BackgroundService
             }
         });
         _store.Log(jobId, "info", automatic ? "Retrying automatically: the usage limit should have reset."
-            : applyAnyway ? "Retrying, ignoring the minimum match." : "Retrying.");
+            : applyAnyway ? "Retrying, ignoring the minimum match."
+            : options != null ? "Retrying: " + options.Describe() + "." : "Retrying.");
         return Enqueue(jobId);
     }
 
@@ -100,10 +106,10 @@ public sealed class JobRunner : BackgroundService
     /// and neither is a job that is already running. Returns how many were queued. Jobs waiting on a usage limit are included:
     /// asking to retry everything overrides their wait (a limit that is still in force simply fails them again and holds the queue).
     /// </summary>
-    public int RetryAllFailed()
+    public int RetryAllFailed(RetryOptions? options = null)
     {
         var ids = _store.ReadAll(r => (r.Id, r.Status)).Where(j => j.Status == JobStatus.Failed).Select(j => j.Id).Reverse().ToList();
-        return ids.Count(id => !IsActive(id) && Retry(id));
+        return ids.Count(id => !IsActive(id) && Retry(id, options: options));
     }
 
     // ---- usage limits ----
@@ -139,8 +145,11 @@ public sealed class JobRunner : BackgroundService
         _logger.LogWarning("The AI usage limit was reached; queued jobs wait until {Until:u}.", until);
     }
 
-    /// <summary>Marks a limit-hit job to be retried automatically once the limit has reset. False when it is not such a job.</summary>
-    public bool ArmAutoRetry(Guid jobId)
+    /// <summary>
+    /// Marks a limit-hit job to be retried automatically once the limit has reset. False when it is not such a job. The choices of the
+    /// retry dialog are saved on the job now: the retry itself happens later, by itself, with whatever the job holds then.
+    /// </summary>
+    public bool ArmAutoRetry(Guid jobId, RetryOptions? options = null)
     {
         if (!_store.Read(jobId, r => r.Status == JobStatus.Failed && r.LimitHit && !r.AutoRetry)) return false;
 
@@ -148,16 +157,23 @@ public sealed class JobRunner : BackgroundService
         {
             r.AutoRetry = true;
             r.LimitRetries = 0;
+            if (options != null)
+            {
+                r.Options.AutoSubmit = options.AutoSubmit;
+                r.Options.MinMatchPercent = options.MinMatchPercent;
+            }
         });
-        _store.Log(jobId, "info", "Will retry automatically once the usage limit has reset.");
+        _store.Log(jobId, "info", options != null
+            ? "Will retry automatically once the usage limit has reset: " + options.Describe() + "."
+            : "Will retry automatically once the usage limit has reset.");
         return true;
     }
 
     /// <summary>Arms every limit-hit job that is not already armed. Returns how many.</summary>
-    public int ArmAllLimited()
+    public int ArmAllLimited(RetryOptions? options = null)
     {
         var ids = _store.ReadAll(r => (r.Id, Armable: r.Status == JobStatus.Failed && r.LimitHit && !r.AutoRetry)).Where(j => j.Armable).Select(j => j.Id);
-        return ids.Count(ArmAutoRetry);
+        return ids.Count(id => ArmAutoRetry(id, options));
     }
 
     /// <summary>Stops waiting for the limit: the job stays failed and is left for the user to retry or delete.</summary>

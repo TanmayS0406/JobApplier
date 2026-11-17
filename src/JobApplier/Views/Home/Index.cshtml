@@ -52,12 +52,15 @@
     </form>
 </section>
 
-<div id="replies" data-poll-url="@Url.Action("Replies", "Gmail")" data-poll-ms="60000"
+<div id="replies" data-poll-url="@Url.Action("Replies", "Gmail", Model.Replies.Query.ToRoute())" data-poll-ms="60000" data-list-prefix="replies"
      data-check-url="@Url.Action("Check", "Gmail")" data-dismiss-url="@Url.Action("Dismiss", "Gmail")"
      data-enable-url="@Url.Action("Enable", "Gmail")">
     @await Html.PartialAsync("_Replies", Model.Replies)
 </div>
 
-<div id="live" data-poll-url="@Url.Action("Live", "Home")" data-poll-ms="2500">
+<div id="live" data-poll-url="@Url.Action("Live", "Home", Model.Live.Query.ToRoute())" data-poll-ms="2500" data-list-prefix="jobs">
     @await Html.PartialAsync("_Live", Model.Live)
 </div>
+
+@* Outside #live on purpose: that area is replaced every 2.5 seconds, which would close the dialog while someone is choosing. *@
+<partial name="_RetryDialog" model="new RetryDialogModel(Model.DefaultAutoSubmit, Model.DefaultMinMatch)" />

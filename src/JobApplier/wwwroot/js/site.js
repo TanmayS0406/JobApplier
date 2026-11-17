@@ -7,8 +7,25 @@
     let lastHelpCount = 0;
 
     // ---------- polling: [data-poll-url] ----------
+    // Fetches the area's current address (which the list controls may have changed) and puts the answer in the area.
+    // Requests can finish out of order (change the sort, then the filter, and the sort's answer may arrive last), so each request is
+    // numbered and only the newest one is allowed to draw: an older answer is for an address that is no longer the current one.
+    // skipIf lets a caller drop even the newest answer, for example while the user is typing in the area.
+    async function redrawArea(el, skipIf) {
+        const ticket = (el._redrawTicket = (el._redrawTicket ?? 0) + 1);
+        const response = await fetch(el.dataset.pollUrl, { headers: { 'X-Requested-With': 'fetch' }, cache: 'no-store' });
+        if (!response.ok) return false;
+        const html = await response.text();
+        if (ticket !== el._redrawTicket) return false;
+        if (skipIf && skipIf()) return false;
+        el.innerHTML = html;
+        // Only the live job list reports a help count; other polled areas (the replies card) must not reset the tab title.
+        const helpCount = response.headers.get('X-Help-Count');
+        if (helpCount !== null) reflectHelpCount(Number(helpCount));
+        return true;
+    }
+
     function startPolling(el) {
-        const url = el.dataset.pollUrl;
         const every = Number(el.dataset.pollMs) || 2500;
         let busy = false;
 
@@ -23,15 +40,9 @@
 
             busy = true;
             try {
-                const response = await fetch(url, { headers: { 'X-Requested-With': 'fetch' }, cache: 'no-store' });
-                if (!response.ok) return;
-                const html = await response.text();
-                if (userIsTyping()) return; // started typing while the request was in flight
-                el.innerHTML = html;
-                // Only the live job list reports a help count; other polled areas (the replies card) must not reset the tab title.
-                const helpCount = response.headers.get('X-Help-Count');
-                if (helpCount !== null) reflectHelpCount(Number(helpCount));
-                if (el.querySelector('[data-terminal="true"]')) clearInterval(timer);
+                // userIsTyping again after the answer: the user may have started typing while the request was in flight
+                const drawn = await redrawArea(el, userIsTyping);
+                if (drawn && el.querySelector('[data-terminal="true"]')) clearInterval(timer);
             } catch {
                 // server restarting or offline: try again on the next tick
             } finally {
@@ -62,6 +73,80 @@
         } catch { /* audio not available */ }
     }
     reflectHelpCount(document.querySelectorAll('.needs-you .help-card').length);
+
+    // ---------- lists: sort, "match at least", page size and page buttons ----------
+    // A list lives in an area with data-poll-url and data-list-prefix. Its controls carry data-list-param (a select), data-list-page
+    // (a page button) or data-list-reset. The state is kept in the poll address of the area (so polling does not jump back to page 1)
+    // and mirrored in the page address as {prefix}_page, {prefix}_sort, ... so a reload or a copied link shows the same page.
+    const listKeys = ['page', 'size', 'sort', 'min'];
+
+    function setListParams(area, changes) {
+        const poll = new URL(area.dataset.pollUrl, location.origin);
+        for (const [key, value] of Object.entries(changes)) {
+            if (value === '' || value === null || value === undefined) poll.searchParams.delete(key);
+            else poll.searchParams.set(key, value);
+        }
+        area.dataset.pollUrl = poll.pathname + poll.search;
+
+        const prefix = area.dataset.listPrefix;
+        const page = new URL(location.href);
+        for (const key of listKeys) {
+            page.searchParams.delete(`${prefix}_${key}`);
+            if (poll.searchParams.has(key)) page.searchParams.set(`${prefix}_${key}`, poll.searchParams.get(key));
+        }
+        history.replaceState(null, '', page.pathname + page.search + page.hash);
+    }
+
+    document.addEventListener('change', async (event) => {
+        const select = event.target instanceof Element ? event.target.closest('[data-list-param]') : null;
+        const area = select?.closest('[data-list-prefix]');
+        if (!select || !area) return;
+        // a different sort, filter or page size starts again from the first page
+        setListParams(area, { [select.dataset.listParam]: select.value, page: '' });
+        try { await redrawArea(area); } catch { /* the next poll will try again */ }
+    });
+
+    document.addEventListener('click', async (event) => {
+        if (!(event.target instanceof Element)) return;
+        const area = event.target.closest('[data-list-prefix]');
+        if (!area) return;
+
+        const pageButton = event.target.closest('[data-list-page]');
+        const reset = event.target.closest('[data-list-reset]');
+        if (!pageButton && !reset) return;
+        if (pageButton?.disabled) return;
+
+        setListParams(area, pageButton ? { page: pageButton.dataset.listPage } : { min: '', page: '' });
+        try { await redrawArea(area); } catch { /* the next poll will try again */ }
+    });
+
+    // ---------- Retry dialog: submit automatically / the lowest match worth applying for ----------
+    // Any button with data-retry-open opens the one dialog (placed outside the areas that refresh themselves) and tells it where to post,
+    // what to call itself and which values to start from (data-retry-auto / data-retry-min; without them the dialog's own defaults).
+    document.addEventListener('click', (event) => {
+        if (!(event.target instanceof Element)) return;
+        const dialog = document.getElementById('retry-dialog');
+        if (!dialog) return;
+
+        // the backdrop is the dialog element itself; the form inside has the padding, so a click on the form is never a click on the backdrop
+        if (event.target === dialog || event.target.closest('[data-retry-cancel]')) {
+            dialog.close();
+            return;
+        }
+
+        const opener = event.target.closest('[data-retry-open]');
+        if (!opener) return;
+
+        const form = dialog.querySelector('form');
+        // setAttribute, not form.action: a control named "action" would replace the property (the same trap as the help forms)
+        form.setAttribute('action', opener.dataset.retryAction);
+        dialog.querySelector('[data-retry-title]').textContent = opener.dataset.retryTitle ?? 'Retry';
+        dialog.querySelector('[data-retry-note]').textContent = opener.dataset.retryNote ?? '';
+        dialog.querySelector('[data-retry-go]').textContent = opener.dataset.retryGo ?? 'Retry';
+        form.elements['autoSubmit'].checked = (opener.dataset.retryAuto ?? dialog.dataset.defaultAuto) === 'true';
+        form.elements['minMatch'].value = opener.dataset.retryMin ?? dialog.dataset.defaultMin;
+        dialog.showModal();
+    });
 
     // ---------- answering a help request: [data-help-form] ----------
     document.addEventListener('submit', async (event) => {
@@ -97,8 +182,7 @@
         } finally {
             const area = form.closest('[data-poll-url]');
             if (area) {
-                const r = await fetch(area.dataset.pollUrl, { cache: 'no-store' });
-                if (r.ok) area.innerHTML = await r.text();
+                await redrawArea(area);
             } else {
                 location.reload();
             }
@@ -377,10 +461,7 @@
         const area = document.getElementById('replies');
         if (!area || !(event.target instanceof Element)) return;
 
-        const redraw = async () => {
-            const r = await fetch(area.dataset.pollUrl, { cache: 'no-store' });
-            if (r.ok) area.innerHTML = await r.text();
-        };
+        const redraw = () => redrawArea(area);
 
         // Follows the first check after tracking was started: redraws the card until Claude is done with it.
         const followChecking = () => {

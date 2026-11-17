@@ -34,8 +34,9 @@ public class HomeController : Controller
         var settings = _settings.Current;
         return View(new DashboardViewModel
         {
-            Live = LiveViewModelBuilder.Build(_store, _runner.PausedUntilUtc, _replies),
-            Replies = RepliesViewModelBuilder.Build(_replies, _checker, _accounts),
+            // Each list reads its own page, sort and filter from the dashboard's address (jobs_page, replies_sort, ...), so a reload shows the same page.
+            Live = LiveViewModelBuilder.Build(_store, _runner.PausedUntilUtc, _replies, ListQuery.FromQuery(Request.Query, "jobs", ListQuery.JobSorts)),
+            Replies = RepliesViewModelBuilder.Build(_replies, _checker, _accounts, _store, ListQuery.FromQuery(Request.Query, "replies", ListQuery.ReplySorts)),
             HasResume = _profile.HasResume && !string.IsNullOrWhiteSpace(profile.ResumeText),
             HasEmail = !string.IsNullOrWhiteSpace(profile.Email),
             ProfileEmail = profile.Email,
@@ -48,9 +49,9 @@ public class HomeController : Controller
 
     /// <summary>The part of the dashboard that changes while jobs run (help requests + results table). Polled by the page.</summary>
     [HttpGet]
-    public IActionResult Live()
+    public IActionResult Live(int? page, int? size, string? sort, int? min)
     {
-        var model = LiveViewModelBuilder.Build(_store, _runner.PausedUntilUtc, _replies);
+        var model = LiveViewModelBuilder.Build(_store, _runner.PausedUntilUtc, _replies, ListQuery.Create(page, size, sort, min, ListQuery.JobSorts));
         Response.Headers["X-Help-Count"] = model.Help.Count.ToString();
         Response.Headers.CacheControl = "no-store";
         return PartialView("_Live", model);

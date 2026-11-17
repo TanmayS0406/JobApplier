@@ -51,12 +51,39 @@ public sealed record JobRow(
 
 public sealed record HelpItem(Guid JobId, string Company, string Title, HelpRequest Request);
 
+/// <summary>
+/// What the results header and its buttons say about ALL jobs, however many there are on the page and whatever filter is set:
+/// "Retry all failed (24)" must count the 24, not the 10 that happen to be shown.
+/// </summary>
+public sealed record JobCounts(int Total, int Running, int Applied, int Waiting, int Limited, int FailedAll)
+{
+    /// <summary>A failed job that is waiting for a usage limit to reset is not abandoned, so it is not counted as one to clear.</summary>
+    public int Failed => FailedAll - Waiting;
+
+    public static JobCounts From(IReadOnlyList<JobRow> rows) => new(
+        rows.Count,
+        rows.Count(r => !r.Status.IsTerminal()),
+        rows.Count(r => r.Status == JobStatus.Applied),
+        rows.Count(r => r.Status == JobStatus.Failed && r.LimitHit && r.AutoRetry),
+        rows.Count(r => r.Status == JobStatus.Failed && r.LimitHit && !r.AutoRetry),
+        rows.Count(r => r.Status == JobStatus.Failed));
+}
+
 public sealed class LiveViewModel
 {
     /// <summary>Set while new jobs are held back because the AI usage limit was reached.</summary>
     public DateTime? PausedUntilUtc { get; init; }
 
+    /// <summary>The jobs on the current page, after the filter and the sort.</summary>
     public IReadOnlyList<JobRow> Rows { get; init; } = Array.Empty<JobRow>();
+
+    /// <summary>Totals over every job (not just this page).</summary>
+    public JobCounts Counts { get; init; } = new(0, 0, 0, 0, 0, 0);
+
+    /// <summary>The paging, sort and filter in effect (the page already corrected to one that exists).</summary>
+    public ListQuery Query { get; init; } = ListQuery.Default;
+
+    public PageInfo Page { get; init; } = new(1, 10, 0, 1, 0, 0);
     public IReadOnlyList<HelpItem> Help { get; init; } = Array.Empty<HelpItem>();
 
     /// <summary>Reply tracking is on, so a job without a reply is "no reply yet" rather than unknown.</summary>
@@ -77,10 +104,22 @@ public sealed class RepliesViewModel
     public DateTime? LastCheckedUtc { get; init; }
     public string LastError { get; init; } = "";
 
+    /// <summary>How many replies exist, before any filter.</summary>
+    public int Total { get; init; }
+
+    /// <summary>Replies per kind over all replies (the chips above the list), not just this page.</summary>
+    public IReadOnlyDictionary<ReplyKind, int> KindCounts { get; init; } = new Dictionary<ReplyKind, int>();
+
+    /// <summary>The match percentage of each reply's job, for the sort and the chip on a reply. A job that was never scored, or was deleted, has none.</summary>
+    public IReadOnlyDictionary<Guid, int> MatchByJob { get; init; } = new Dictionary<Guid, int>();
+
+    public ListQuery Query { get; init; } = ListQuery.Default;
+    public PageInfo Page { get; init; } = new(1, 10, 0, 1, 0, 0);
+
     /// <summary>Newest first.</summary>
     public IReadOnlyList<EmployerReply> Replies { get; init; } = Array.Empty<EmployerReply>();
 
-    public int Count(ReplyKind kind) => Replies.Count(r => r.Kind == kind);
+    public int Count(ReplyKind kind) => KindCounts.GetValueOrDefault(kind);
 }
 
 public sealed class DashboardViewModel
@@ -127,3 +166,6 @@ public sealed class SettingsViewModel
 }
 
 public sealed record SystemCheck(string Name, bool Ok, string Detail);
+
+/// <summary>The starting values of the Retry dialog when the button that opens it does not carry its own (the dashboard buttons use the defaults of the upload form).</summary>
+public sealed record RetryDialogModel(bool DefaultAutoSubmit, int DefaultMinMatch);

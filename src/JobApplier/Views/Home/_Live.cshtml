@@ -1,12 +1,18 @@
 @model LiveViewModel
 @{
-    var running = Model.Rows.Count(r => !r.Status.IsTerminal());
-    var applied = Model.Rows.Count(r => r.Status == JobStatus.Applied);
-    // A failed job that is waiting for a usage limit to reset is not abandoned, so it is neither "failed" to clear nor counted twice.
-    var waiting = Model.Rows.Count(r => r.Status == JobStatus.Failed && r.LimitHit && r.AutoRetry);
-    var limited = Model.Rows.Count(r => r.Status == JobStatus.Failed && r.LimitHit && !r.AutoRetry);
-    var failedAll = Model.Rows.Count(r => r.Status == JobStatus.Failed);
-    var failed = failedAll - waiting;
+    // Totals are over ALL jobs: Model.Rows is only the current page, and "Retry all failed (24)" must count the 24.
+    var running = Model.Counts.Running;
+    var applied = Model.Counts.Applied;
+    var waiting = Model.Counts.Waiting;
+    var limited = Model.Counts.Limited;
+    var failedAll = Model.Counts.FailedAll;
+    var failed = Model.Counts.Failed;
+    var jobSorts = new[]
+    {
+        (ListQuery.SortNewest, "Newest first"), (ListQuery.SortMatchHigh, "Match: high to low"),
+        (ListQuery.SortMatchLow, "Match: low to high"), (ListQuery.SortCompany, "Company A-Z")
+    };
+    var jobBar = new ListBar(Model.Query, Model.Page, jobSorts, "jobs", Model.Counts.Total);
 }
 
 @if (Model.PausedUntilUtc is DateTime pausedUntil)
@@ -37,22 +43,27 @@
 <section class="card">
     <div class="card-head">
         <h2>Results</h2>
-        @if (Model.Rows.Count > 0)
+        @if (Model.Counts.Total > 0)
         {
             <div class="head-tools">
-                <span class="muted small">@Model.Rows.Count job@(Model.Rows.Count == 1 ? "" : "s") &middot; @running running &middot; @applied applied@(waiting > 0 ? $" · {waiting} waiting for the limit" : "")</span>
+                <span class="muted small">@Model.Counts.Total job@(Model.Counts.Total == 1 ? "" : "s") &middot; @running running &middot; @applied applied@(waiting > 0 ? $" · {waiting} waiting for the limit" : "")</span>
                 @if (failedAll > 0)
                 {
-                    <form asp-controller="Jobs" asp-action="RetryAllFailed" method="post"
-                          data-confirm="Retry all @failedAll failed job@(failedAll == 1 ? "" : "s") now? They start a few at a time (see Settings) in the order they were added. A job that stopped on a usage limit fails again if the limit has not reset yet - use 'Retry when available' for those.">
-                        <button class="btn primary compact" type="submit" title="Queue every failed job again. Work that already succeeded (reading the screenshot, finding the posting, the match score) is kept.">Retry all failed (@failedAll)</button>
-                    </form>
+                    <button type="button" class="btn primary compact" data-retry-open
+                            data-retry-action="@Url.Action("RetryAllFailed", "Jobs")"
+                            data-retry-title="Retry all @failedAll failed job@(failedAll == 1 ? "" : "s")"
+                            data-retry-note="They start a few at a time (see Settings) in the order they were added. Choose how they should apply this time. A job that stopped on a usage limit fails again if the limit has not reset yet - use 'Retry when available' for those."
+                            data-retry-go="Retry @failedAll"
+                            title="Queue every failed job again, choosing whether to submit automatically and the lowest match worth applying for. Work that already succeeded (reading the screenshot, finding the posting, the match score) is kept.">Retry all failed (@failedAll)</button>
                 }
                 @if (limited > 0)
                 {
-                    <form asp-controller="Jobs" asp-action="RetryAllWhenAvailable" method="post">
-                        <button class="btn compact" type="submit" title="These stopped because the AI ran out of tokens. They will be retried by themselves once the limit has reset.">Retry when available (@limited)</button>
-                    </form>
+                    <button type="button" class="btn compact" data-retry-open
+                            data-retry-action="@Url.Action("RetryAllWhenAvailable", "Jobs")"
+                            data-retry-title="Retry @limited job@(limited == 1 ? "" : "s") when available"
+                            data-retry-note="These stopped because the AI ran out of tokens. Each one is retried by itself once the limit has reset, with the choices below."
+                            data-retry-go="Retry when available"
+                            title="These stopped because the AI ran out of tokens. They will be retried by themselves once the limit has reset.">Retry when available (@limited)</button>
                 }
                 @if (failed > 0)
                 {
@@ -65,12 +76,23 @@
         }
     </div>
 
-    @if (Model.Rows.Count == 0)
+    @if (Model.Counts.Total == 0)
     {
         <p class="muted">Nothing yet. Add some screenshots above.</p>
     }
     else
     {
+        @if (Model.Counts.Total > 1)
+        {
+            <partial name="_ListBar" model="jobBar" />
+        }
+
+        @if (Model.Rows.Count == 0)
+        {
+            <p class="muted">No job matches this filter. <button type="button" class="link" data-list-reset>Clear the filter</button></p>
+        }
+        else
+        {
         <div class="table-wrap">
             <table class="results">
                 <thead>
@@ -155,5 +177,8 @@
                 </tbody>
             </table>
         </div>
+        }
+
+        <partial name="_Pager" model="jobBar" />
     }
 </section>

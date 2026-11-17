@@ -1,0 +1,31 @@
+@model ListBar
+@* "Showing 11-20 of 47" and the page buttons. Only drawn when there is more than one page or a filter is on. The buttons carry the page number they go to. *@
+@if (Model.Page.TotalPages > 1 || Model.IsFiltered)
+{
+    <nav class="pager" aria-label="Pages of @Model.Noun">
+        <span class="muted small">
+            @if (Model.Page.TotalItems == 0)
+            {
+                <text>Nothing to show</text>
+            }
+            else
+            {
+                <text>Showing @Model.Page.First&ndash;@Model.Page.Last of @Model.Page.TotalItems</text>
+            }
+            @if (Model.IsFiltered)
+            {
+                <text> (match at least @(Model.Query.MinMatch)%, @Model.Unfiltered in total)</text>
+            }
+        </span>
+        @if (Model.Page.TotalPages > 1)
+        {
+            <div class="pager-buttons">
+                <button type="button" class="btn compact" data-list-page="1" disabled="@(!Model.Page.HasPrevious)" aria-label="First page">&laquo;</button>
+                <button type="button" class="btn compact" data-list-page="@(Model.Page.Page - 1)" disabled="@(!Model.Page.HasPrevious)">&lsaquo; Prev</button>
+                <span class="small">Page @Model.Page.Page of @Model.Page.TotalPages</span>
+                <button type="button" class="btn compact" data-list-page="@(Model.Page.Page + 1)" disabled="@(!Model.Page.HasNext)">Next &rsaquo;</button>
+                <button type="button" class="btn compact" data-list-page="@Model.Page.TotalPages" disabled="@(!Model.Page.HasNext)" aria-label="Last page">&raquo;</button>
+            </div>
+        }
+    </nav>
+}

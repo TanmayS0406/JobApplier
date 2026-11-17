@@ -152,6 +152,13 @@ fill the form and ask you for help in the same way, and both are signed in with 
 * **Retry all failed.** The button in the Results header queues every *Failed* job again, oldest first (a few at a time, as set in
   Settings); finished stages are kept and *Applied* jobs are never touched. If a limit is still in force the jobs fail again and
   the queue is held back, so nothing is lost by pressing it early - *Retry when available* is the patient version.
+* **Choose how a retry applies.** Every Retry button (*Retry all failed*, *Retry when available*, and *Retry* / *Retry now* on a job's
+  page) opens a small dialog with the same two choices as the upload form: **Submit applications automatically** and **Skip jobs that
+  match less than N%**. The dashboard buttons start from the upload form's defaults (Settings); a single job's button starts from that
+  job's own settings. What you choose replaces the job's settings before it is queued again, and is written in the job log. The
+  minimum is checked against the match score the job already has (finished work is kept), so lowering it lets a job that was skipped
+  for a low score go on, and raising it skips one that would have applied. *Retry when available* saves the choices on the job now and
+  the automatic retry uses them later. *Apply anyway* still ignores the minimum.
 * **Usage limits.** If the AI runs out of tokens or quota (Claude's "5-hour / weekly limit reached", Gemini's "429 RESOURCE_EXHAUSTED" and
   similar), the job is marked *usage limit* instead of just *Failed*, with the reset time when the error gives one. New jobs that
   have not started yet are held back until then (a banner says so) instead of all failing the same way. On the job page or the
@@ -176,6 +183,19 @@ The agent scores five dimensions 0-100 from evidence in the resume; the app comp
 `skills 40% + experience 25% + domain 15% + seniority 10% + logistics 10%`
 
 The details page shows each part, the skills you have, and the gaps.
+
+### Long lists: pages, sort by match, filter by match
+
+The *Results* table and the *Replies from employers* card are shown a page at a time (10, 25, 50 or 100 per page). Under each title:
+
+* **Sort**: newest first (the default), **match high to low**, **match low to high** (jobs also: company A-Z). A job that has no match
+  percentage yet always comes last, whichever way the percentage is sorted.
+* **Match at least**: only items whose match percentage is at or above 50, 60, 70, 80 or 90%. A job that has not been scored yet is left
+  out while a filter is on. A reply has the match of the job it answers (shown on the reply as "87% match").
+* The totals ("27 jobs", "Retry all failed (8)", the reply counts per kind) always cover **everything**, not only the page you are on.
+
+The page, sort and filter are kept in the address (`jobs_page`, `jobs_sort`, `replies_min`, ...), so a reload or a copied link shows the
+same page, and the list keeps refreshing by itself without jumping back to the first page.
 
 ## The accounts document
 

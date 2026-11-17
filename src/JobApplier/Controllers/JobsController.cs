@@ -136,18 +136,24 @@ public class JobsController : Controller
         return IsFetch() ? Ok() : RedirectToAction(nameof(Details), new { id });
     }
 
+    /// <summary>
+    /// Retries a job. <paramref name="optionsChosen"/> says the retry dialog was used: its <paramref name="autoSubmit"/> checkbox and
+    /// <paramref name="minMatch"/> (0-100) then replace the job's own settings. Without it the job keeps what it had.
+    /// </summary>
     [HttpPost]
-    public IActionResult Retry(Guid id, bool applyAnyway)
+    public IActionResult Retry(Guid id, bool applyAnyway, bool optionsChosen = false, bool autoSubmit = false, int? minMatch = null)
     {
-        if (!_runner.Retry(id, applyAnyway)) TempData["Error"] = "That job cannot be retried right now.";
+        if (!_runner.Retry(id, applyAnyway, options: RetryOptions.From(optionsChosen, autoSubmit, minMatch))) TempData["Error"] = "That job cannot be retried right now.";
         return IsFetch() ? Ok() : RedirectToAction(nameof(Details), new { id });
     }
 
     /// <summary>For a job that stopped on a usage limit: retry by itself once the limit has reset.</summary>
     [HttpPost]
-    public IActionResult RetryWhenAvailable(Guid id)
+    public IActionResult RetryWhenAvailable(Guid id, bool optionsChosen = false, bool autoSubmit = false, int? minMatch = null)
     {
-        if (_runner.ArmAutoRetry(id)) TempData["Message"] = "OK. This job will be retried automatically once the usage limit has reset.";
+        var options = RetryOptions.From(optionsChosen, autoSubmit, minMatch);
+        if (_runner.ArmAutoRetry(id, options))
+            TempData["Message"] = "OK. This job will be retried automatically once the usage limit has reset" + (options == null ? "." : " (" + options.Describe() + ").");
         else TempData["Error"] = "That job is not waiting on a usage limit.";
         return IsFetch() ? Ok() : RedirectToAction(nameof(Details), new { id });
     }
@@ -162,23 +168,26 @@ public class JobsController : Controller
 
     /// <summary>The dashboard button: retry every failed job now.</summary>
     [HttpPost]
-    public IActionResult RetryAllFailed()
+    public IActionResult RetryAllFailed(bool optionsChosen = false, bool autoSubmit = false, int? minMatch = null)
     {
-        var queued = _runner.RetryAllFailed();
+        var options = RetryOptions.From(optionsChosen, autoSubmit, minMatch);
+        var queued = _runner.RetryAllFailed(options);
         TempData["Message"] = queued == 0
             ? "There were no failed jobs to retry."
-            : $"Retrying {queued} failed job{(queued == 1 ? "" : "s")}. They run {_settings.Current.MaxParallelJobs} at a time.";
+            : $"Retrying {queued} failed job{(queued == 1 ? "" : "s")}" + (options == null ? "" : " (" + options.Describe() + ")")
+              + $". They run {_settings.Current.MaxParallelJobs} at a time.";
         return RedirectToAction("Index", "Home");
     }
 
     /// <summary>The dashboard button: every job that stopped on a usage limit will retry by itself once it has reset.</summary>
     [HttpPost]
-    public IActionResult RetryAllWhenAvailable()
+    public IActionResult RetryAllWhenAvailable(bool optionsChosen = false, bool autoSubmit = false, int? minMatch = null)
     {
-        var armed = _runner.ArmAllLimited();
+        var options = RetryOptions.From(optionsChosen, autoSubmit, minMatch);
+        var armed = _runner.ArmAllLimited(options);
         TempData["Message"] = armed == 0
             ? "No jobs are waiting on a usage limit."
-            : $"{armed} job{(armed == 1 ? "" : "s")} will be retried automatically once the usage limit has reset.";
+            : $"{armed} job{(armed == 1 ? "" : "s")} will be retried automatically once the usage limit has reset" + (options == null ? "." : " (" + options.Describe() + ").");
         return RedirectToAction("Index", "Home");
     }
 

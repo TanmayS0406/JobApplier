@@ -254,3 +254,19 @@ a.chip:hover { text-decoration: none; border-color: var(--accent); }
 .reply-actions { margin-top: .3rem; }
 .reply-cell { min-width: 11rem; max-width: 17rem; }
 .reply-line { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: .2rem; }
+
+/* ---- lists: sort, filter and pages ---- */
+.list-bar { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem 1.2rem; margin: .4rem 0 .8rem; font-size: .85rem; color: var(--muted); }
+.list-bar label { display: inline-flex; align-items: center; gap: .4rem; }
+.list-bar select { width: auto; padding: .2rem .5rem; font-size: .85rem; }
+.pager { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .6rem 1rem; margin-top: .9rem; padding-top: .7rem; border-top: 1px solid var(--line); }
+.pager-buttons { display: flex; align-items: center; gap: .4rem; }
+.chip-match { background: transparent; color: var(--muted); }
+
+/* ---- the Retry dialog ---- */
+.retry-dialog { border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); color: var(--text); padding: 0; width: min(34rem, calc(100% - 2rem)); }
+.retry-dialog::backdrop { background: rgba(10, 14, 24, .6); }
+.retry-dialog form { padding: 1.2rem 1.4rem; margin: 0; }
+.retry-dialog h2 { margin: 0 0 .4rem; }
+.retry-dialog .options { margin-top: .9rem; }
+.retry-dialog input[type=number] { width: 5rem; }

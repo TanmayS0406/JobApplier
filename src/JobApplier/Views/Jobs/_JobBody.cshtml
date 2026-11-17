@@ -64,13 +64,23 @@
                     }
                     else
                     {
-                        <form method="post" asp-controller="Jobs" asp-action="RetryWhenAvailable" asp-route-id="@job.Id"><button class="btn primary">Retry when available</button></form>
+                        <button type="button" class="btn primary" data-retry-open
+                                data-retry-action="@Url.Action("RetryWhenAvailable", "Jobs", new { id = job.Id })"
+                                data-retry-title="Retry this job when available"
+                                data-retry-note="It is retried by itself once the usage limit has reset, with the choices below."
+                                data-retry-go="Retry when available"
+                                data-retry-auto="@job.Options.AutoSubmit.ToString().ToLowerInvariant()" data-retry-min="@job.Options.MinMatchPercent">Retry when available</button>
                     }
                 }
                 @if (job.Status != JobStatus.Applied)
                 {
                     // An applied job is finished: retrying it would submit a second application.
-                    <form method="post" asp-controller="Jobs" asp-action="Retry" asp-route-id="@job.Id"><button class="btn @(job.LimitHit ? "" : "primary")">@(job.LimitHit ? "Retry now" : "Retry")</button></form>
+                    <button type="button" class="btn @(job.LimitHit ? "" : "primary")" data-retry-open
+                            data-retry-action="@Url.Action("Retry", "Jobs", new { id = job.Id })"
+                            data-retry-title="Retry this job"
+                            data-retry-note="Work that already succeeded (reading the screenshot, finding the posting, the match score) is kept; the step that did not is done again."
+                            data-retry-go="Retry"
+                            data-retry-auto="@job.Options.AutoSubmit.ToString().ToLowerInvariant()" data-retry-min="@job.Options.MinMatchPercent">@(job.LimitHit ? "Retry now" : "Retry")</button>
                 }
                 @if (job.Status == JobStatus.Skipped && match != null && job.Options.MinMatchPercent > 0 && job.Apply == null)
                 {

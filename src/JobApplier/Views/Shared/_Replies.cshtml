@@ -1,10 +1,14 @@
 @model RepliesViewModel
 @{
-    const int Shown = 40;
+    var replySorts = new[]
+    {
+        (ListQuery.SortNewest, "Newest reply first"), (ListQuery.SortMatchHigh, "Match: high to low"), (ListQuery.SortMatchLow, "Match: low to high")
+    };
+    var replyBar = new ListBar(Model.Query, Model.Page, replySorts, "replies", Model.Total);
     var kinds = new[] { ReplyKind.Offer, ReplyKind.MovingForward, ReplyKind.InfoRequested, ReplyKind.Rejected, ReplyKind.Acknowledged, ReplyKind.Unclear };
 }
 
-@if (!Model.Enabled && Model.Replies.Count == 0)
+@if (!Model.Enabled && Model.Total == 0)
 {
     <section class="card replies-card" data-checking="false">
         <div class="card-head"><h2>Replies from employers</h2></div>
@@ -54,7 +58,7 @@ else
             </div>
         }
 
-        @if (Model.Replies.Count > 0)
+        @if (Model.Total > 0)
         {
             <div class="chips reply-summary">
                 @foreach (var kind in kinds)
@@ -67,8 +71,18 @@ else
                 }
             </div>
 
+            @if (Model.Total > 1)
+            {
+                <partial name="_ListBar" model="replyBar" />
+            }
+
+            @if (Model.Replies.Count == 0)
+            {
+                <p class="muted">No reply matches this filter. <button type="button" class="link" data-list-reset>Clear the filter</button></p>
+            }
+
             <ul class="reply-list">
-                @foreach (var reply in Model.Replies.Take(Shown))
+                @foreach (var reply in Model.Replies)
                 {
                     <li class="reply">
                         <div class="reply-top">
@@ -81,6 +95,10 @@ else
                             @if (reply.Role.Length > 0)
                             {
                                 <span class="muted">@reply.Role</span>
+                            }
+                            @if (Model.MatchByJob.TryGetValue(reply.JobId, out var match))
+                            {
+                                <span class="chip chip-match" title="How well your resume matches this job">@match% match</span>
                             }
                             <span class="muted small reply-date" title="@reply.ReceivedUtc.ToLocalTime().ToString("f")">@RelativeTime.Ago(reply.ReceivedUtc)</span>
                         </div>
@@ -102,10 +120,7 @@ else
                     </li>
                 }
             </ul>
-            @if (Model.Replies.Count > Shown)
-            {
-                <p class="muted small">@(Model.Replies.Count - Shown) older repl@(Model.Replies.Count - Shown == 1 ? "y is" : "ies are") not shown.</p>
-            }
+            <partial name="_Pager" model="replyBar" />
         }
         else
         {

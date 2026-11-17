@@ -1,0 +1,35 @@
+@model RetryDialogModel
+@*
+    The chooser for every "Retry" button: submit automatically or not, and the lowest match percentage worth applying for.
+    It is placed OUTSIDE the lists that refresh themselves every few seconds, so a refresh cannot close it while someone is choosing.
+    The button that opens it (data-retry-open) says where the form posts and fills in the title and the starting values.
+*@
+<dialog id="retry-dialog" class="retry-dialog" data-default-auto="@Model.DefaultAutoSubmit.ToString().ToLowerInvariant()" data-default-min="@Model.DefaultMinMatch">
+    <form method="post" data-busy="Retrying...">
+        @Html.AntiForgeryToken()
+        <input type="hidden" name="optionsChosen" value="true" />
+        <h2 data-retry-title>Retry</h2>
+        <p class="muted small" data-retry-note></p>
+
+        <div class="options">
+        <label class="check">
+            <input type="checkbox" name="autoSubmit" value="true" />
+            <span>
+                <strong>Submit applications automatically</strong>
+                <small>Off (recommended at first): the form is filled in, then it waits for your OK before the final Submit click.</small>
+            </span>
+        </label>
+        <label class="inline">
+            Skip jobs that match less than
+            <input type="number" name="minMatch" min="0" max="100" />
+            %
+            <small>0 = apply to everything. A job that already has a match score is judged by this minimum, not the one it had before.</small>
+        </label>
+        </div>
+
+        <div class="actions">
+            <button type="submit" class="btn primary" data-retry-go>Retry</button>
+            <button type="button" class="btn ghost" data-retry-cancel>Cancel</button>
+        </div>
+    </form>
+</dialog>

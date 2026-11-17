@@ -1,0 +1,32 @@
+@model ListBar
+@* Sort, "match at least" and page size for a list. The page script (data-list-param) reloads the list with the new value; changing any of them goes back to page 1. *@
+<div class="list-bar">
+    <label>Sort
+        <select data-list-param="sort" aria-label="Sort the @Model.Noun">
+            @foreach (var (value, label) in Model.Sorts)
+            {
+                <option value="@value" selected="@(Model.Query.Sort == value)">@label</option>
+            }
+        </select>
+    </label>
+    <label>Match at least
+        <select data-list-param="min" aria-label="Only @Model.Noun with a match of at least">
+            @foreach (var choice in ListQuery.MinMatchChoices)
+            {
+                <option value="@choice" selected="@(Model.Query.MinMatch == choice)">@(choice == 0 ? "any" : choice + "%")</option>
+            }
+        </select>
+    </label>
+    <label>Per page
+        <select data-list-param="size" aria-label="@Model.Noun per page">
+            @foreach (var size in ListQuery.PageSizes)
+            {
+                <option value="@size" selected="@(Model.Query.PageSize == size)">@size</option>
+            }
+        </select>
+    </label>
+    @if (Model.IsFiltered)
+    {
+        <button type="button" class="link small" data-list-reset>Clear filter</button>
+    }
+</div>

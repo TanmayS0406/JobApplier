@@ -48,6 +48,23 @@ public sealed class JobOptions
     public int MinMatchPercent { get; set; }
 }
 
+/// <summary>
+/// What the user chose in the "Retry" dialog: the same two choices as on the upload form. They replace the job's own settings before it is
+/// queued again. The minimum match is checked against the match score the job already has, so a score that was kept is judged by the new
+/// minimum, and auto-submit is read when the apply stage starts.
+/// </summary>
+public sealed record RetryOptions(bool AutoSubmit, int MinMatchPercent)
+{
+    /// <summary>The choices as the form posted them. Null when the form did not carry any (an older button), which leaves every job as it was.</summary>
+    public static RetryOptions? From(bool chosen, bool autoSubmit, int? minMatch) =>
+        chosen ? new RetryOptions(autoSubmit, Math.Clamp(minMatch ?? 0, 0, 100)) : null;
+
+    /// <summary>"submits automatically, skips below 70%" - for the job log and the message after the click.</summary>
+    public string Describe() =>
+        (AutoSubmit ? "submits automatically" : "waits for your approval before submitting")
+        + (MinMatchPercent > 0 ? $", skips below {MinMatchPercent}%" : ", no minimum match");
+}
+
 // ---- Structured results returned by the agents. [Description] text becomes part of the JSON schema. ----
 
 public sealed class ExtractedJob

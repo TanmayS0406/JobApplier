@@ -15,17 +15,19 @@ public class GmailController : Controller
     private readonly MailChecker _checker;
     private readonly ReplyStore _replies;
     private readonly AccountService _accounts;
+    private readonly JobStore _jobs;
     private readonly SettingsService _settings;
     private readonly IHostApplicationLifetime _lifetime;
     private readonly ILogger<GmailController> _logger;
 
-    public GmailController(IMailReader reader, MailChecker checker, ReplyStore replies, AccountService accounts, SettingsService settings,
+    public GmailController(IMailReader reader, MailChecker checker, ReplyStore replies, AccountService accounts, JobStore jobs, SettingsService settings,
                            IHostApplicationLifetime lifetime, ILogger<GmailController> logger)
     {
         _reader = reader;
         _checker = checker;
         _replies = replies;
         _accounts = accounts;
+        _jobs = jobs;
         _settings = settings;
         _lifetime = lifetime;
         _logger = logger;
@@ -139,12 +141,13 @@ public class GmailController : Controller
     [HttpPost]
     public IActionResult Dismiss(Guid id) => Json(new { ok = _replies.Dismiss(id) });
 
-    /// <summary>The replies card of the dashboard. Polled by the page.</summary>
+    /// <summary>The replies card of the dashboard. Polled by the page; <c>page</c>, <c>size</c>, <c>sort</c> and <c>min</c> (match at least, in percent) page, sort and filter it.</summary>
     [HttpGet]
-    public IActionResult Replies()
+    public IActionResult Replies(int? page, int? size, string? sort, int? min)
     {
         Response.Headers.CacheControl = "no-store";
-        return PartialView("_Replies", RepliesViewModelBuilder.Build(_replies, _checker, _accounts));
+        var query = ListQuery.Create(page, size, sort, min, ListQuery.ReplySorts);
+        return PartialView("_Replies", RepliesViewModelBuilder.Build(_replies, _checker, _accounts, _jobs, query));
     }
 
     private async Task CheckInBackgroundAsync(CancellationToken cancellationToken)

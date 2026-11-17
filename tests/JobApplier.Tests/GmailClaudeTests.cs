@@ -1126,7 +1126,7 @@ public class GmailControllerTests
         var store = new ReplyStore(env.Paths);
         var checker = new MailChecker(reader, accounts, store, NullLogger<MailChecker>.Instance);
 
-        var controller = new GmailController(reader, checker, store, accounts, settings, new StubLifetime(), NullLogger<GmailController>.Instance)
+        var controller = new GmailController(reader, checker, store, accounts, new JobStore(env.Paths, NullLogger<JobStore>.Instance), settings, new StubLifetime(), NullLogger<GmailController>.Instance)
         {
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() }
         };
@@ -1171,7 +1171,7 @@ public class GmailControllerTests
         var reader = new FakeReader { Gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously) };
         var store = new ReplyStore(env.Paths);
         var checker = new MailChecker(reader, accounts, store, NullLogger<MailChecker>.Instance);
-        var controller = new GmailController(reader, checker, store, accounts, settings, new StubLifetime(), NullLogger<GmailController>.Instance)
+        var controller = new GmailController(reader, checker, store, accounts, new JobStore(env.Paths, NullLogger<JobStore>.Instance), settings, new StubLifetime(), NullLogger<GmailController>.Instance)
         {
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() }
         };
@@ -1299,6 +1299,11 @@ public class GmailControllerTests
 
     [Theory]
     [InlineData("/Views/Shared/_Replies.cshtml")]   // rendered by GmailController.Replies (which only searches Views/Gmail and Views/Shared) and by the dashboard
+    [InlineData("/Views/Shared/_ListBar.cshtml")]
+    [InlineData("/Views/Shared/_RetryDialog.cshtml")]   // the Retry chooser: included by the dashboard and by the job page
+    [InlineData("/Views/Jobs/Details.cshtml")]
+    [InlineData("/Views/Jobs/_JobBody.cshtml")]
+    [InlineData("/Views/Shared/_Pager.cshtml")]
     [InlineData("/Views/Home/Index.cshtml")]
     [InlineData("/Views/Home/_Live.cshtml")]
     [InlineData("/Views/Settings/Index.cshtml")]
