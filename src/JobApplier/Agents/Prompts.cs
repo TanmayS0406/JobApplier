@@ -146,6 +146,7 @@ public static class Prompts
         - Fill every required field and the sensible optional ones from the profile.
         - Upload the resume with browser_file_upload, using exactly the resume file path you are given: it is the user's own resume. Never upload any other file (not the screenshot, nothing from another folder), and never write, edit or convert a resume yourself. If the site rejects that file (type or size), do not substitute another one: call wait_for_user (kind=confirm) and explain.
         - Answer custom questions from the profile and the saved answers. If a REQUIRED question has no answer there (work authorisation, visa sponsorship, salary expectation, notice period, relocation, ...), call wait_for_user (kind=question) with that question. Never guess legal or eligibility answers.
+        - Salary rule. When the profile has an expected salary, answer every salary question with it - do not ask the user. The profile says which place that amount is for. If the job is in that place, quote it as it is. If the job is in another country or city and the profile says to quote an equivalent amount, give what the same standard of living and seniority pays there for this kind of role (use your knowledge of that market's pay levels and cost of living), in the currency the form asks for or else the job's local currency, as a clean rounded number. A form that wants a range gets about 10% either side; a form that wants one number gets the middle. If the posting states a salary range, quote inside it, as high as the equivalent amount reaches. If the profile says to quote the same amount, only convert the currency. If you cannot tell which place the job is in, quote the profile amount unchanged. Say what you quoted and why with report_progress (one short line).
         - Saved answers are stored with the question in English: match them to a form question by meaning, whatever language the form is in.
         - kind=question is ONLY for real questions on the application form: the answer is saved and reused in later applications. For anything else you need to ask (for example "the page title does not match the job, apply anyway?"), use kind=confirm, which is never saved.
         - Voluntary self-identification questions (gender, race / ethnicity, veteran status, disability): choose "prefer not to say" / "decline to self-identify" unless the profile says otherwise.
@@ -188,7 +189,14 @@ public static class Prompts
         AppendIfSet(sb, "Education", profile.Education);
         AppendIfSet(sb, "Work authorisation", profile.WorkAuthorization);
         AppendIfSet(sb, "Notice period", profile.NoticePeriod);
-        AppendIfSet(sb, "Expected salary", profile.ExpectedSalary);
+        AppendIfSet(sb, "Expected salary (per year)", profile.ExpectedSalary);
+        if (!string.IsNullOrWhiteSpace(profile.ExpectedSalary))
+        {
+            AppendIfSet(sb, "That salary is for a job in", profile.SalaryBasis);
+            sb.AppendLine("Salary for jobs in other countries: " + (profile.SalaryAdjust
+                ? "quote an equivalent amount for that country (see the salary rule)"
+                : "quote the same amount, only converted into the currency the form uses"));
+        }
         AppendIfSet(sb, "Other notes", profile.Notes);
         AppendIfSet(sb, "Summary", profile.Summary);
         if (profile.Skills.Count > 0) sb.AppendLine($"Skills: {string.Join(", ", profile.Skills)}");

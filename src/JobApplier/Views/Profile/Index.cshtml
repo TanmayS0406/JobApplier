@@ -53,7 +53,16 @@
         <div class="form-grid">
             <label>Work authorisation / visa status<input name="WorkAuthorization" value="@p.WorkAuthorization" placeholder="e.g. Authorised to work in the UK, no sponsorship needed" /></label>
             <label>Notice period<input name="NoticePeriod" value="@p.NoticePeriod" placeholder="e.g. 1 month" /></label>
-            <label>Expected salary<input name="ExpectedSalary" value="@p.ExpectedSalary" placeholder="e.g. 90,000 USD" /></label>
+            <label>Expected salary (per year)<input name="ExpectedSalary" value="@p.ExpectedSalary" placeholder="e.g. EUR 75000" /></label>
+            <label>...for a job in<input name="SalaryBasis" value="@p.SalaryBasis" placeholder="e.g. Berlin, Germany" /></label>
+            <label class="check wide">
+                <input type="hidden" name="SalaryAdjust" value="false" />
+                <input type="checkbox" name="SalaryAdjust" value="true" @(p.SalaryAdjust ? "checked" : null) />
+                <span>
+                    <strong>Quote an equivalent amount for other countries</strong>
+                    <small>On: a job in Spain or elsewhere is quoted what this salary is worth there (local pay levels and cost of living, in the form's currency). Off: the same amount, only converted to the currency.</small>
+                </span>
+            </label>
             <label class="wide">Anything else the agent should know<textarea name="Notes" rows="2">@p.Notes</textarea></label>
         </div>
 

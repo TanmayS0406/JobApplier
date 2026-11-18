@@ -331,6 +331,13 @@ public sealed class UserProfile
     public string WorkAuthorization { get; set; } = "";
     public string NoticePeriod { get; set; } = "";
     public string ExpectedSalary { get; set; } = "";
+
+    /// <summary>Where <see cref="ExpectedSalary"/> is meant for, e.g. "Berlin, Germany". Jobs elsewhere are quoted an equivalent amount.</summary>
+    public string SalaryBasis { get; set; } = "";
+
+    /// <summary>Quote an equivalent amount for the job's country (pay levels, cost of living, currency) instead of the same figure everywhere.</summary>
+    public bool SalaryAdjust { get; set; } = true;
+
     public string Notes { get; set; } = "";
 
     /// <summary>File name of the resume copy kept in the data folder.</summary>
