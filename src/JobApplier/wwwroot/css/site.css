@@ -67,6 +67,8 @@ h3 { font-size: .85rem; margin: 1rem 0 .4rem; text-transform: uppercase; letter-
 
 .pill { padding: .25rem .75rem; border-radius: 999px; font-size: .82rem; border: 1px solid var(--line); color: var(--muted); }
 .pill:hover { text-decoration: none; }
+.pills { display: flex; gap: .4rem; flex-wrap: wrap; }
+.pill-active { font-weight: 600; }
 .pill-ok { color: var(--good); border-color: var(--good); }
 .pill-bad { color: var(--low); border-color: var(--low); }
 

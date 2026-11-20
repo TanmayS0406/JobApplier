@@ -24,9 +24,14 @@
             <a class="@Active("Profile")" asp-controller="Profile" asp-action="Index">Profile</a>
             <a class="@Active("Settings")" asp-controller="Settings" asp-action="Index">Settings</a>
         </nav>
-        <a id="provider-pill" class="pill pill-unknown" asp-controller="Settings" asp-action="Index"
-           data-status-url="@Url.Action(useGemini ? "GeminiStatus" : "ClaudeStatus", "Settings")"
-           data-provider="@(useGemini ? "Gemini" : "Claude")">@(useGemini ? "Gemini" : "Claude"): checking...</a>
+        <span class="pills">
+            <a class="pill pill-unknown @(useGemini ? "" : "pill-active")" asp-controller="Settings" asp-action="Index" data-provider-pill
+               data-status-url="@Url.Action("ClaudeStatus", "Settings")" data-provider="Claude" data-active="@(!useGemini ? "true" : "false")"
+               title="@(useGemini ? "Claude: not used for jobs (change the AI in Settings). Used for Gmail replies." : "Claude is the AI that runs your jobs.")">Claude: checking...</a>
+            <a class="pill pill-unknown @(useGemini ? "pill-active" : "")" asp-controller="Settings" asp-action="Index" data-provider-pill
+               data-status-url="@Url.Action("GeminiStatus", "Settings")" data-provider="Gemini" data-active="@(useGemini ? "true" : "false")"
+               title="@(useGemini ? "Gemini is the AI that runs your jobs." : "Gemini: not used for jobs (change the AI in Settings).")">Gemini: checking...</a>
+        </span>
     </header>
 
     <main class="container">

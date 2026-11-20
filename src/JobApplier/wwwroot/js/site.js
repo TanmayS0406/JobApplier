@@ -233,17 +233,22 @@
         } catch { return null; }
     }
 
-    const pill = document.getElementById('provider-pill');
-    async function refreshPill(force = false) {
-        if (!pill) return null;
+    // One pill per provider in the header: each shows whether that CLI is installed and signed in, and the one that runs the jobs says so.
+    const pills = [...document.querySelectorAll('[data-provider-pill]')];
+    async function refreshOnePill(pill, force) {
         const s = await fetchStatus(pill.dataset.statusUrl, force);
         if (!s) return null;
         const name = pill.dataset.provider || 'AI';
+        const inUse = pill.dataset.active === 'true' ? ' - in use' : '';
         pill.classList.remove('pill-ok', 'pill-bad', 'pill-unknown');
-        if (!s.cliFound) { pill.textContent = name + ' CLI not found'; pill.classList.add('pill-bad'); }
-        else if (!s.loggedIn) { pill.textContent = name + ': not signed in'; pill.classList.add('pill-bad'); }
-        else { pill.textContent = name + ': ' + (s.detail || 'signed in') + (s.plan ? ' (' + s.plan + ')' : ''); pill.classList.add('pill-ok'); }
+        if (!s.cliFound) { pill.textContent = name + ': CLI not found' + inUse; pill.classList.add('pill-bad'); }
+        else if (!s.loggedIn) { pill.textContent = name + ': not signed in' + inUse; pill.classList.add('pill-bad'); }
+        else if (s.warning) { pill.textContent = name + ': ' + s.warning + inUse; pill.classList.add('pill-bad'); }
+        else { pill.textContent = name + ': ' + (s.detail || 'signed in') + (s.plan ? ' (' + s.plan + ')' : '') + inUse; pill.classList.add('pill-ok'); }
         return s;
+    }
+    async function refreshPill(force = false) {
+        await Promise.all(pills.map(p => refreshOnePill(p, force)));
     }
     refreshPill();
     setInterval(refreshPill, 30000);

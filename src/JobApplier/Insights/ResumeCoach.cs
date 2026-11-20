@@ -159,13 +159,13 @@ public static class ResumeCoach
                 if (evidence.Length < 8 || !resume.Contains(Normal(evidence), StringComparison.Ordinal))
                 {
                     change.Verdict = CoachVerdict.LearnIt;
-                    change.Note = "Claude suggested adding this, but the quote it gave is not in your resume, so it is shown as something to learn first.";
+                    change.Note = "The coach suggested adding this, but the quote it gave is not in your resume, so it is shown as something to learn first.";
                 }
                 else if (wording.Length == 0 || !numbersOk)
                 {
                     change.Verdict = CoachVerdict.LearnIt;
                     change.Note = wording.Length == 0
-                        ? "Claude gave no wording to add, so it is shown as something to learn first."
+                        ? "The coach gave no wording to add, so it is shown as something to learn first."
                         : "The suggested wording used a number that is not in your resume, so it was not kept.";
                 }
                 else

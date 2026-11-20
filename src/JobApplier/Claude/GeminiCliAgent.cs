@@ -24,6 +24,9 @@ public sealed class GeminiCliAgent : CliAgent
     /// <summary>Environment variable that makes the CLI load the generated settings file as its system settings.</summary>
     public const string SettingsVariable = "GEMINI_CLI_SYSTEM_SETTINGS_PATH";
 
+    /// <summary>Environment variable that moves the CLI's whole <c>.gemini</c> folder (settings, state) somewhere else.</summary>
+    public const string HomeVariable = "GEMINI_CLI_HOME";
+
     public GeminiCliAgent(ClaudeAgentSpec spec) : base(spec) { }
 
     protected override async IAsyncEnumerable<ClaudeEvent> ExecuteAsync(
@@ -33,12 +36,26 @@ public sealed class GeminiCliAgent : CliAgent
             ?? throw new ClaudeAgentException("Gemini CLI not found. Install it with 'npm install -g @google/gemini-cli', or set its path in Settings.");
 
         Directory.CreateDirectory(Spec.PrivateFolder);
-        var settingsFile = Path.Combine(Spec.PrivateFolder, $"{Safe(Spec.Name)}-gemini-settings.json");
-        File.WriteAllText(settingsFile, GeminiSettings.Build(Spec).ToJsonString(), new UTF8Encoding(false));
-
+        var settings = GeminiSettings.Build(Spec).ToJsonString();
         var info = ClaudeCli.CreateStartInfo(cliPath, BuildArguments(), Spec.WorkingDirectory);
-        info.Environment[SettingsVariable] = settingsFile;
         GeminiCli.ApplyStoredApiKey(info.Environment);   // a key saved from Settings authenticates the run without the user setting a variable
+
+        if (GeminiCli.HasApiKey(info.Environment))
+        {
+            // The CLI ignores a "system settings" file that is not in a folder it considers admin-owned ("Skipping system settings file ...
+            // is insecure" - always the case for a folder of ours on Windows), and with it the browser tool and the tool restrictions. User
+            // settings are always read, and with an API key no Google login has to be found in the real home, so the run gets its own home.
+            var home = Path.Combine(Spec.PrivateFolder, "gemini-home");
+            Directory.CreateDirectory(Path.Combine(home, ".gemini"));
+            File.WriteAllText(Path.Combine(home, ".gemini", "settings.json"), settings, new UTF8Encoding(false));
+            info.Environment[HomeVariable] = home;
+        }
+        else
+        {
+            var settingsFile = Path.Combine(Spec.PrivateFolder, $"{Safe(Spec.Name)}-gemini-settings.json");
+            File.WriteAllText(settingsFile, settings, new UTF8Encoding(false));
+            info.Environment[SettingsVariable] = settingsFile;
+        }
         using var process = ClaudeCli.Start(info);
         using var kill = cancellationToken.Register(() => ClaudeCli.KillTree(process));
 
@@ -81,6 +98,7 @@ public sealed class GeminiCliAgent : CliAgent
             throw Describe(result.Text ?? parser.LastError ?? stderr);
         if (result == null)
             throw Describe(FirstNonEmpty(stderr, parser.LastError) ?? $"Gemini CLI exited with code {process.ExitCode} without a result.");
+        GeminiHealth.GoogleSignInRejected = false;   // it ran: whatever sign-in is used works
         if (schema != null && result.StructuredJson == null)
             throw new ClaudeAgentException(
                 "Gemini did not return the structured result that was asked for. If this was the Apply step, check the employer's site before retrying: the form may already have been submitted. " +
@@ -124,6 +142,14 @@ public sealed class GeminiCliAgent : CliAgent
     private static string Clip(string? text, int max) =>
         string.IsNullOrEmpty(text) ? "(nothing)" : text.Length <= max ? text : text[..max] + "...";
 
-    private static ClaudeAgentException Describe(string error) =>
-        AgentErrors.Describe(error, "Open Settings and press 'Sign in with Google'.");
+    internal static ClaudeAgentException Describe(string error)
+    {
+        var cleaned = GeminiErrors.Clean(error);
+        if (GeminiErrors.IsRetiredClient(cleaned))
+        {
+            GeminiHealth.GoogleSignInRejected = true;
+            return new ClaudeAgentException(GeminiErrors.RetiredClientMessage, isAuthProblem: true);
+        }
+        return AgentErrors.Describe(cleaned, "Open Settings and press 'Sign in with Google', or paste a Gemini API key.");
+    }
 }

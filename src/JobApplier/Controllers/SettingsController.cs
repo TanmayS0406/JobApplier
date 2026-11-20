@@ -1,3 +1,4 @@
+using JobApplier.Claude;
 using JobApplier.Domain;
 using JobApplier.Infrastructure;
 using JobApplier.Models;
@@ -63,7 +64,8 @@ public class SettingsController : Controller
     {
         var s = _gemini.GetStatus();
         Response.Headers.CacheControl = "no-store";
-        return Json(new { cliFound = s.CliFound, loggedIn = s.LoggedIn, detail = s.Detail, plan = (string?)null, source = s.Source, npmFound = s.NpmFound });
+        // A Google-account sign-in that Google has refused on a real run is not "signed in" in any useful sense.
+        return Json(new { cliFound = s.CliFound, loggedIn = s.LoggedIn, detail = s.Detail, plan = (string?)null, source = s.Source, npmFound = s.NpmFound, warning = GeminiHealth.WarningFor(s.Source) });
     }
 
     /// <summary>Opens a console window that installs the Gemini CLI.</summary>

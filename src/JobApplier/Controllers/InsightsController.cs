@@ -1,3 +1,4 @@
+using JobApplier.Domain;
 using JobApplier.Insights;
 using JobApplier.Services;
 using Microsoft.AspNetCore.Mvc;
@@ -6,10 +7,10 @@ namespace JobApplier.Controllers;
 
 public sealed record InsightsViewModel(GapReport Report, int Threshold, IReadOnlyList<int> Thresholds, bool HasResume, CoachViewModel Coach);
 
-public sealed record CoachViewModel(CoachStatus Status, int Threshold, bool HasResume);
+public sealed record CoachViewModel(CoachStatus Status, int Threshold, bool HasResume, string Provider);
 
 /// <summary>
-/// "What should my resume say?": the statistical analysis of the scored jobs (ML.NET text model, Math.NET regression) and, on request, Claude's
+/// "What should my resume say?": the statistical analysis of the scored jobs (ML.NET text model, Math.NET regression) and, on request, the selected AI's
 /// advice on the skills it found. The resume is sent to the selected AI provider only when the user presses the button; every POST is covered
 /// by the antiforgery filter.
 /// </summary>
@@ -32,7 +33,7 @@ public class InsightsController : Controller
     public IActionResult Index(int? t)
     {
         var threshold = Pick(t);
-        return View(new InsightsViewModel(_analysis.Analyze(threshold), threshold, Thresholds, HasResume, new CoachViewModel(_coach.Status(threshold), threshold, HasResume)));
+        return View(new InsightsViewModel(_analysis.Analyze(threshold), threshold, Thresholds, HasResume, Coach(threshold)));
     }
 
     /// <summary>The coach card. Polled while a run is going.</summary>
@@ -41,7 +42,7 @@ public class InsightsController : Controller
     {
         Response.Headers.CacheControl = "no-store";
         var threshold = Pick(t);
-        return PartialView("_Coach", new CoachViewModel(_coach.Status(threshold), threshold, HasResume));
+        return PartialView("_Coach", Coach(threshold));
     }
 
     [HttpPost]
@@ -50,6 +51,10 @@ public class InsightsController : Controller
         var (started, message) = _coach.Start(Pick(t));
         return Json(new { ok = started, message });
     }
+
+    /// <summary>The coach card's data. The AI that answers is the one selected in Settings (Claude or Gemini), so the page names it.</summary>
+    private CoachViewModel Coach(int threshold) =>
+        new(_coach.Status(threshold), threshold, HasResume, AiProvider.Label(_settings.Current.Provider));
 
     private bool HasResume => !string.IsNullOrWhiteSpace(_analysis.ResumeText);
 

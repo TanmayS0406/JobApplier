@@ -199,6 +199,8 @@ public static class GeminiSettings
         {
             ["mcpServers"] = servers,
             ["mcp"] = new JsonObject { ["allowed"] = new JsonArray(spec.McpServers.Keys.Select(k => (JsonNode)k).ToArray()) },
+            // Without this the CLI treats the job's working folder as untrusted and switches every MCP server (the browser) off.
+            ["security"] = new JsonObject { ["folderTrust"] = new JsonObject { ["enabled"] = false } },
             ["tools"] = new JsonObject
             {
                 ["core"] = new JsonArray(ReadTool),
@@ -225,4 +227,44 @@ public static class GeminiSettings
         result["trust"] = true;
         return result;
     }
+}
+
+/// <summary>What the Gemini CLI prints besides its answer, and the one error that is not the user's to fix with a retry.</summary>
+public static class GeminiErrors
+{
+    public const string RetiredClientMessage =
+        "Google no longer accepts the Gemini CLI's sign-in with a personal Google account (\"This client is no longer supported for Gemini Code Assist for individuals\"). " +
+        "Use a Gemini API key instead: create a free one at aistudio.google.com/apikey and paste it in Settings, under Gemini account.";
+
+    public static bool IsRetiredClient(string? error) =>
+        error != null && error.Contains("no longer supported for Gemini Code Assist", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>The CLI's start-up warnings (terminal colours, settings folder permissions, ripgrep) are not the reason a run failed: leave them out.</summary>
+    public static string Clean(string? error)
+    {
+        var lines = (error ?? "").Split('\n').Select(l => l.Trim())
+            .Where(l => l.Length > 0 && !l.StartsWith("Warning:", StringComparison.OrdinalIgnoreCase) && !l.StartsWith("Security Warning:", StringComparison.OrdinalIgnoreCase)
+                        && !l.StartsWith("Ripgrep is not available", StringComparison.OrdinalIgnoreCase) && !l.StartsWith("Loaded cached credentials", StringComparison.OrdinalIgnoreCase));
+        var text = string.Join(" ", lines);
+        return text.Length > 0 ? text : (error ?? "").Trim();
+    }
+}
+
+/// <summary>
+/// Remembers that Google refused the Google-account sign-in on the last Gemini run, so the header can say so instead of showing "signed in" for
+/// a sign-in that cannot run anything. Cleared by any run that works. Process-wide because agents are created per run, not injected.
+/// </summary>
+public static class GeminiHealth
+{
+    private static volatile bool _googleSignInRejected;
+
+    public static bool GoogleSignInRejected
+    {
+        get => _googleSignInRejected;
+        set => _googleSignInRejected = value;
+    }
+
+    /// <summary>What the header should warn about for a sign-in of this kind: only a Google-account sign-in can be refused, an API key never is.</summary>
+    public static string? WarningFor(string source) =>
+        source == "google" && _googleSignInRejected ? "Google rejected this sign-in - use an API key" : null;
 }

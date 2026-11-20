@@ -79,6 +79,9 @@ default in Settings) once you trust it. There is also a *minimum match %* to ski
 
 ### Claude or Gemini
 
+The header shows both: one badge per provider (*Claude: ...*, *Gemini: ...*) saying whether its CLI is installed and signed in, and the
+one that runs the jobs is marked *in use*.
+
 *Settings -> AI provider* chooses what runs the jobs; it applies to the next job. Both providers read the screenshot, search, score,
 fill the form and ask you for help in the same way, and both are signed in with your own account. Differences to know about:
 
@@ -87,7 +90,9 @@ fill the form and ask you for help in the same way, and both are signed in with 
   check the employer's site first if it was the Apply step).
 * **Tools.** Each Gemini agent gets one built-in tool, a read-only file reader confined to the job's workspace; shell, file
   writing and web tools are refused. Its MCP servers (the browser and this app) come from a settings file in the job's private
-  folder, passed through `GEMINI_CLI_SYSTEM_SETTINGS_PATH`, so the app's token is never inside the agent's reach.
+  folder, so the app's token is never inside the agent's reach. The CLI ignores a "system settings" file kept in a folder it does not
+  consider admin-owned (always the case on Windows), so when an API key is used the file is placed in a per-run `GEMINI_CLI_HOME` in
+  that private folder as ordinary user settings, with the CLI's folder-trust check off (otherwise it disables the browser as "untrusted").
 * **Signing in to Gemini is three clicks at most.** In *Settings -> Gemini account*:
   1. **Install Gemini CLI** (only shown when it is missing) opens a window that runs `npm install -g @google/gemini-cli`; the page
      notices when it is done.
@@ -96,7 +101,9 @@ fill the form and ask you for help in the same way, and both are signed in with 
      saves it as `GEMINI_API_KEY` in `~/.gemini/.env`, the file the Gemini CLI itself reads, so the CLI works the same outside this
      app. It is shown masked (`AIza...ghij`) and *Remove saved key* deletes it. If Google cannot be reached the key is saved
      with a note that it was not checked.
-  3. **Option B - sign in with Google**: opens the Gemini CLI; press Enter on *Login with Google*, choose your account in the
+  3. **Option B - sign in with Google** (**no longer works for personal Google accounts**: Google now answers "This client is no longer
+     supported for Gemini Code Assist for individuals"; the app shows that as a clear message and a warning on the Gemini badge in
+     the header, and asks for an API key instead. Workspace accounts may still work): opens the Gemini CLI; press Enter on *Login with Google*, choose your account in the
      browser, and the app closes that window by itself once the login has landed (no `/quit`).
 * **Sign-in state.** Gemini has no "who am I" command: the app shows *signed in* when a cached Google login or an API key variable
   exists. An expired login shows up as a clear error on the first job. *Sign out* removes the cached Google login; an API key in

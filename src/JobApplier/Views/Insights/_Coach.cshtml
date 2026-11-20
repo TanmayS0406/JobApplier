@@ -7,22 +7,22 @@
 }
 @if (!s.Running) { <span hidden data-terminal="true"></span> }
 <div class="card-head">
-    <h2>Claude's advice on your resume</h2>
+    <h2>@Model.Provider's advice on your resume</h2>
     @if (!s.Running)
     {
         <button type="button" class="btn" data-coach-start="@Url.Action("StartCoach", "Insights", new { t = Model.Threshold })" disabled="@(!Model.HasResume)">
-            @(advice == null ? "Ask Claude" : "Ask again")
+            @(advice == null ? $"Ask {Model.Provider}" : "Ask again")
         </button>
     }
 </div>
 <p class="muted small">
-    Pressing the button sends your resume text and the skills above to the AI provider you chose in Settings. Claude may only suggest what your resume already
+    Pressing the button sends your resume text and the skills above to the AI provider you chose in Settings. The coach may only suggest what your resume already
     supports; anything else is listed as something to learn first. Never add a skill to your resume that is not true.
 </p>
 
 @if (s.Running)
 {
-    <div class="banner banner-ok" data-coach-running="true">Claude is reading your resume... this takes a minute or two.</div>
+    <div class="banner banner-ok" data-coach-running="true">@Model.Provider is reading your resume... this takes a minute or two.</div>
 }
 @if (s.Error.Length > 0)
 {

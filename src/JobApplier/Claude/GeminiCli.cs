@@ -182,6 +182,10 @@ public static class GeminiCli
     /// Gives a CLI process the stored key when the environment it will inherit has none, so a headless run authenticates whatever
     /// the CLI's own rules for reading <c>~/.gemini/.env</c> are. The key lives only in that process's environment.
     /// </summary>
+    /// <summary>True when the environment holds a Gemini API key, whether the user set it or it was applied from Settings.</summary>
+    public static bool HasApiKey(IDictionary<string, string?> environment) =>
+        ApiKeyVariables.Any(v => !string.IsNullOrWhiteSpace(environment.TryGetValue(v, out var value) ? value : null));
+
     public static void ApplyStoredApiKey(IDictionary<string, string?> environment, string? home = null)
     {
         if (ApiKeyVariables.Any(v => !string.IsNullOrWhiteSpace(environment.TryGetValue(v, out var existing) ? existing : null))) return;
