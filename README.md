@@ -234,7 +234,7 @@ The results table has an **Employer reply** column: each application shows its l
 account**, the same one you can use in Claude itself. To set it up:
 
 1. Be signed in to Claude (the Claude card in Settings).
-2. Connect Gmail to your Claude account: press *Open Claude to connect Gmail* (a Claude window opens on its `/mcp` screen: choose
+2. Connect Gmail to your Claude account: press *Open Claude to connect Gmail* (a Claude window opens; once its prompt is up, type `/mcp` - right after start-up the connectors are not loaded yet - and choose
    *claude.ai Gmail*, then *Authenticate*), or add *Gmail* at claude.ai -> Settings -> Connectors. Then press *Check connection*.
 3. Press *Start tracking replies* (on the dashboard or here). It first checks that Claude can really use Gmail and, if not, says what is
    missing instead of turning anything on.

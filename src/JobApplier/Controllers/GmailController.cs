@@ -75,7 +75,7 @@ public class GmailController : Controller
         });
     }
 
-    /// <summary>Opens Claude's own connector screen (<c>/mcp</c>) in a console window, where the Gmail connector is signed in to Google.</summary>
+    /// <summary>Opens Claude in a console window, where <c>/mcp</c> leads to the Gmail connector's sign-in to Google.</summary>
     [HttpPost]
     public IActionResult Connect()
     {

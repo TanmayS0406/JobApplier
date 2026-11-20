@@ -775,22 +775,44 @@ public class ClaudeMailReaderTests
             const dir = __dirname;
             const scenario = JSON.parse(fs.readFileSync(path.join(dir, 'scenario.json'), 'utf8'));
             const args = process.argv.slice(2);
-            const probing = args.includes('--input-format');
-            let stdin = '';
+            const scan = args.includes('--json-schema');   // a scan asks for structured output; a probe only asks about connectors
+            const started = Date.now();
+            let stdin = '', probed = false;
             const write = obj => fs.writeSync(1, JSON.stringify(obj) + '\n');
             const log = kind => fs.appendFileSync(path.join(dir, 'calls.jsonl'), JSON.stringify({ kind, args, stdin }) + '\n');
-            const init = () => write({ type: 'system', subtype: 'init', session_id: 's1',
-                tools: (probing ? scenario.tools : (scenario.scanTools ?? scenario.tools)) ?? [],
-                mcp_servers: (probing ? scenario.servers : (scenario.scanServers ?? scenario.servers)) ?? [] });
+            const servers = () => (scan ? (scenario.scanServers ?? scenario.servers) : scenario.servers) ?? [];
+            const tools = () => (scan ? (scenario.scanTools ?? scenario.tools) : scenario.tools) ?? [];
+            const init = () => write({ type: 'system', subtype: 'init', session_id: 's1', tools: tools(), mcp_servers: [] });
+            // like the real CLI: its start-up event lists no connectors, and the status answers list them once they have loaded (loadAfterMs)
+            const status = id => {
+                const loaded = Date.now() - started >= (scenario.loadAfterMs ?? 0);
+                const list = !loaded ? [] : servers().map(s => {
+                    const prefix = 'mcp__' + s.name.replace(/[^A-Za-z0-9_-]/g, '_') + '__';
+                    const own = s.status === 'connected' ? tools().filter(n => n.startsWith(prefix)).map(n => ({ name: n.slice(prefix.length) })) : [];
+                    return { name: s.name, status: s.status, tools: own };
+                });
+                write({ type: 'control_response', response: { subtype: 'success', request_id: id, response: { mcpServers: list } } });
+            };
+            const handle = line => {
+                let m; try { m = JSON.parse(line); } catch { return; }
+                if (m.type === 'control_request') {
+                    if (!probed && !scan) { probed = true; log('probe'); }
+                    if (!scenario.silent) status(m.request_id);
+                } else if (m.type === 'user') {
+                    stdin = typeof m.message.content === 'string' ? m.message.content : JSON.stringify(m.message.content);
+                }
+            };
             process.stdin.setEncoding('utf8');
-            if (probing) {
-                // a probe: report the connectors after the first message, then wait to be killed
-                let reported = false;
-                process.stdin.on('data', d => { stdin += d; if (!reported && stdin.includes('\n')) { reported = true; log('probe'); if (!scenario.silent) init(); } });
-                setInterval(() => {}, 1000);
+            let pending = '';
+            process.stdin.on('data', d => {
+                pending += d; let i;
+                while ((i = pending.indexOf('\n')) >= 0) { handle(pending.slice(0, i)); pending = pending.slice(i + 1); }
+            });
+            if (!scan) {
+                setInterval(() => {}, 1000);   // a probe waits to be killed
             } else {
-                process.stdin.on('data', d => { stdin += d; });
                 process.stdin.on('end', () => {
+                    if (!stdin) { setInterval(() => {}, 1000); return; }   // closed without a prompt: nothing to answer
                     log('scan');
                     if (scenario.hang) { setInterval(() => {}, 1000); return; }
                     init();
@@ -845,6 +867,7 @@ public class ClaudeMailReaderTests
         var reader = new ClaudeMailReader(settings, env.Paths, NullLogger<ClaudeMailReader>.Instance)
         {
             ProbeTimeout = TimeSpan.FromSeconds(20),
+            ConnectorWait = TimeSpan.FromSeconds(1.5),
             ScanTimeout = TimeSpan.FromSeconds(30)
         };
         return (reader, fake, env);
@@ -887,6 +910,86 @@ public class ClaudeMailReaderTests
         var status = await reader.GetStatusAsync(false, CancellationToken.None);
 
         Assert.Equal(ConnectorState.NeedsAuth, status.State);
+    }
+
+    [Fact]
+    public async Task Connectors_that_load_a_few_seconds_after_start_up_are_waited_for_not_reported_missing()
+    {
+        if (!FakeClaude.Available()) return;
+        // the real CLI lists no connectors at first and the Gmail connector a moment later
+        var (reader, _, env) = Create(new { servers = ConnectedServers, tools = GmailTools, loadAfterMs = 900 });
+        using var _e = env;
+        reader.ConnectorWait = TimeSpan.FromSeconds(8);
+
+        var status = await reader.GetStatusAsync(false, CancellationToken.None);
+
+        Assert.Equal(ConnectorState.Ready, status.State);
+        Assert.Equal(new[] { Search, GetThread }, status.ReadTools);
+    }
+
+    [Fact]
+    public async Task A_connector_that_never_shows_up_is_reported_as_not_added_once_the_wait_is_over()
+    {
+        if (!FakeClaude.Available()) return;
+        var (reader, _, env) = Create(new { servers = Array.Empty<object>(), tools = Array.Empty<string>() });
+        using var _e = env;
+
+        var status = await reader.GetStatusAsync(false, CancellationToken.None);
+
+        Assert.Equal(ConnectorState.NotAdded, status.State);
+    }
+
+    [Fact]
+    public async Task A_scan_sends_its_prompt_only_after_the_connector_has_loaded()
+    {
+        if (!FakeClaude.Available()) return;
+        var request = Request();
+        var id = request.Applications[0].Id.ToString();
+        var (reader, fake, env) = Create(new { servers = ConnectedServers, tools = GmailTools, loadAfterMs = 900, structured = JsonSerializer.Deserialize<JsonElement>(ReplyJson(id)) });
+        using var _e = env;
+        reader.ConnectorWait = TimeSpan.FromSeconds(5);
+        // the probe's answer is reused; the scan itself must still wait for its own session's connectors
+        await reader.GetStatusAsync(false, CancellationToken.None);
+
+        var replies = await reader.ScanAsync(request, CancellationToken.None);
+
+        Assert.Equal(id, Assert.Single(replies).ApplicationId);
+        Assert.Contains("--input-format", fake.Calls().Single(c => c.Kind == "scan").Args);
+    }
+
+    [Fact]
+    public void The_live_status_answer_is_read_into_servers_and_tools_under_the_names_the_model_sees()
+    {
+        const string line = """{"type":"control_response","response":{"subtype":"success","request_id":"mcp","response":{"mcpServers":[{"name":"claude.ai Gmail","status":"connected","tools":[{"name":"search_threads"},{"name":"create_draft"}]},{"name":"claude.ai Google Drive","status":"needs-auth","tools":[]},{"name":"claude.ai Indeed","status":"pending"}]}}}""";
+
+        var parsed = ClaudeMailReader.ParseMcpStatus(line)!;
+
+        Assert.Equal(new[] { ("claude.ai Gmail", "connected"), ("claude.ai Google Drive", "needs-auth"), ("claude.ai Indeed", "pending") }, parsed.McpServers);
+        Assert.Equal(new[] { Draft, Search }, parsed.Tools!.Order());
+        Assert.Equal(ConnectorState.Ready, ClaudeMailReader.Evaluate(parsed).State);
+        Assert.True(ClaudeMailReader.Settled(parsed));
+
+        Assert.Null(ClaudeMailReader.ParseMcpStatus("""{"type":"system","subtype":"init"}"""));
+        Assert.Null(ClaudeMailReader.ParseMcpStatus("not json control_response"));
+        Assert.Null(ClaudeMailReader.ParseMcpStatus("""{"type":"control_response","response":{"subtype":"error","error":"x"}}"""));
+    }
+
+    [Theory]
+    [InlineData("pending", false)]
+    [InlineData("needs-auth", true)]
+    [InlineData("failed", true)]
+    public void Gmail_is_settled_once_it_is_no_longer_connecting(string status, bool settled)
+    {
+        var connectors = new InitEvent(null, new[] { ("claude.ai Gmail", status) }, Array.Empty<string>());
+
+        Assert.Equal(settled, ClaudeMailReader.Settled(connectors));
+    }
+
+    [Fact]
+    public void A_connected_Gmail_without_its_tools_yet_and_a_list_without_Gmail_are_not_settled()
+    {
+        Assert.False(ClaudeMailReader.Settled(new InitEvent(null, new[] { ("claude.ai Gmail", "connected") }, Array.Empty<string>())));
+        Assert.False(ClaudeMailReader.Settled(new InitEvent(null, new[] { ("claude.ai Indeed", "connected") }, new[] { "mcp__claude_ai_Indeed__search_jobs" })));
     }
 
     [Fact]

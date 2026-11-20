@@ -1,6 +1,8 @@
 using System.ComponentModel;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 using JobApplier.Claude;
 using JobApplier.Infrastructure;
 using JobApplier.Services;
@@ -11,9 +13,10 @@ namespace JobApplier.Mail;
 /// Reads the user's Gmail through their own Claude account: the Gmail connector that is part of the account (added at
 /// claude.ai, signed in to Google there) is used by a headless Claude Code run. JobApplier never sees a Google credential.
 /// <para>
-/// Two kinds of run are made. A <b>probe</b> starts Claude only long enough to see which connectors it has and whether they are signed in
+/// Two kinds of run are made. A <b>probe</b> starts Claude only long enough to ask which connectors it has and whether they are signed in
 /// (that is the one answer that can be trusted; <c>claude mcp list</c> reports connectors as connected that a real session cannot use),
-/// then stops it. A <b>scan</b> asks Claude to look through the mailbox; it is given exactly the connector's read-only search and read
+/// then stops it. The account's connectors are loaded a few seconds after Claude starts - its start-up event lists none yet - so the live
+/// status is asked for (<c>mcp_status</c>) until Gmail has settled. A <b>scan</b> asks Claude to look through the mailbox; it is given exactly the connector's read-only search and read
 /// tools (see <see cref="GmailToolPolicy"/>), no file, shell or web tools, and a permission mode that denies everything else.
 /// </para>
 /// </summary>
@@ -22,8 +25,8 @@ public sealed class ClaudeMailReader : IMailReader
     private static readonly TimeSpan ReadyCacheFor = TimeSpan.FromMinutes(10);
     private static readonly TimeSpan NotReadyCacheFor = TimeSpan.FromSeconds(20);
 
-    // Claude Code only starts up (and reports its connectors) once it has a first message. The probe stops it before it answers.
-    private const string StartMessage = "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"ok\"}}";
+    // Asks a running session for the current state of its MCP servers. No model is involved, so this costs nothing.
+    private const string StatusRequest = "{\"type\":\"control_request\",\"request_id\":\"mcp\",\"request\":{\"subtype\":\"mcp_status\"}}";
 
     private readonly SettingsService _settings;
     private readonly AppPaths _paths;
@@ -41,6 +44,9 @@ public sealed class ClaudeMailReader : IMailReader
 
     /// <summary>How long Claude may take to report its connectors.</summary>
     public TimeSpan ProbeTimeout { get; set; } = TimeSpan.FromSeconds(60);
+
+    /// <summary>How long Claude may take to connect its claude.ai connectors (a few seconds in practice) before Gmail is taken as not there.</summary>
+    public TimeSpan ConnectorWait { get; set; } = TimeSpan.FromSeconds(20);
 
     /// <summary>How long one scan of the mailbox may take. The run is stopped after that.</summary>
     public TimeSpan ScanTimeout { get; set; } = TimeSpan.FromMinutes(12);
@@ -71,7 +77,9 @@ public sealed class ClaudeMailReader : IMailReader
         if (cli == null) return "Claude Code CLI not found. Install it from https://claude.com/claude-code, or set its path below.";
         try
         {
-            ClaudeCli.StartInteractive(cli, "/mcp");
+            // No first input: Claude loads the account's connectors a few seconds after it starts, and a /mcp submitted at once finds none
+            // ("No MCP servers loaded"). The user types /mcp once the prompt is up.
+            ClaudeCli.StartInteractive(cli, null);
             _cached = null;   // whatever was known is about to change
             return null;
         }
@@ -92,7 +100,7 @@ public sealed class ClaudeMailReader : IMailReader
         Directory.CreateDirectory(_paths.MailWorkspace);
         try
         {
-            var init = await ReadInitAsync(cli, cancellationToken);
+            var init = await ReadConnectorsAsync(cli, cancellationToken);
             return init == null
                 ? GmailConnectorStatus.Of(ConnectorState.Failed, "Claude Code ended without saying which connectors it has. Is it signed in? Use 'Sign in with Claude' above.")
                 : Evaluate(init);
@@ -107,7 +115,13 @@ public sealed class ClaudeMailReader : IMailReader
         }
     }
 
-    private async Task<InitEvent?> ReadInitAsync(string cli, CancellationToken cancellationToken)
+    /// <summary>What the connectors look like at one moment, as the last <c>mcp_status</c> answer of a session reported them.</summary>
+    private sealed class ConnectorWatch
+    {
+        public volatile InitEvent? Latest;
+    }
+
+    private async Task<InitEvent?> ReadConnectorsAsync(string cli, CancellationToken cancellationToken)
     {
         var arguments = new[]
         {
@@ -121,17 +135,11 @@ public sealed class ClaudeMailReader : IMailReader
 
         try
         {
-            // The input stays open on purpose: the process is killed as soon as it has said what it has, before it answers anything.
+            // The input stays open on purpose: nothing but status questions is ever sent, so no model runs.
             var stdin = new StreamWriter(process.StandardInput.BaseStream, new UTF8Encoding(false)) { AutoFlush = true };
-            await stdin.WriteLineAsync(StartMessage.AsMemory(), timeout.Token);
-
-            string? line;
-            while ((line = await process.StandardOutput.ReadLineAsync(timeout.Token)) != null)
-            {
-                foreach (var evt in ClaudeStreamParser.Parse(line))
-                    if (evt is InitEvent init) return init;
-            }
-            return null;
+            var watch = new ConnectorWatch();
+            var reader = ReadSessionAsync(process, watch, null, timeout.Token);
+            return await AwaitConnectorsAsync(stdin, watch, reader, timeout.Token);
         }
         finally
         {
@@ -139,7 +147,85 @@ public sealed class ClaudeMailReader : IMailReader
         }
     }
 
-    /// <summary>What a session's init event says about the Gmail connector.</summary>
+    /// <summary>Reads a session's output until it ends: remembers the connector status answers and, for a scan, the result.</summary>
+    private static async Task ReadSessionAsync(System.Diagnostics.Process process, ConnectorWatch watch, Action<ResultEvent>? onResult, CancellationToken cancellationToken)
+    {
+        try
+        {
+            string? line;
+            while ((line = await process.StandardOutput.ReadLineAsync(cancellationToken)) != null)
+            {
+                if (ParseMcpStatus(line) is { } connectors) watch.Latest = connectors;
+                foreach (var evt in ClaudeStreamParser.Parse(line))
+                    if (evt is ResultEvent result) onResult?.Invoke(result);
+            }
+        }
+        catch (Exception ex) when (ex is OperationCanceledException or IOException or ObjectDisposedException)
+        {
+            // the run was stopped; whoever started it knows why
+        }
+    }
+
+    /// <summary>
+    /// Asks the session for its connectors until Gmail has settled (connected with its tools, signed out, or failed) or <see cref="ConnectorWait"/> is over.
+    /// Returns what was last reported; null when the session never answered (it is then up to the caller's timeout).
+    /// </summary>
+    private async Task<InitEvent?> AwaitConnectorsAsync(StreamWriter stdin, ConnectorWatch watch, Task reader, CancellationToken cancellationToken)
+    {
+        var deadline = DateTime.UtcNow + ConnectorWait;
+        while (true)
+        {
+            await stdin.WriteLineAsync(StatusRequest.AsMemory(), cancellationToken);
+            await Task.Delay(300, cancellationToken);
+
+            var latest = watch.Latest;
+            if (latest != null && (Settled(latest) || DateTime.UtcNow >= deadline)) return latest;
+            if (reader.IsCompleted) return latest;
+        }
+    }
+
+    private static bool IsGmailServer((string Name, string Status) s) => s.Name.Contains("gmail", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Gmail is in the list and is no longer connecting: connected with tools to offer, or signed out, or failed.</summary>
+    internal static bool Settled(InitEvent connectors)
+    {
+        var gmail = connectors.McpServers.Where(IsGmailServer).ToList();
+        if (gmail.Count == 0) return false;
+        if (gmail.Any(s => s.Status.Equals("connected", StringComparison.OrdinalIgnoreCase)))
+            return (connectors.Tools ?? Array.Empty<string>()).Any(GmailToolPolicy.IsGmailTool);
+        return gmail.All(s => !s.Status.Equals("pending", StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// The connectors in an <c>mcp_status</c> answer, shaped like the start-up event used to be: each server with its status, and the tools of the
+    /// connected ones under the names the model sees (<c>mcp__claude_ai_Gmail__search_threads</c>). Null for any other line.
+    /// </summary>
+    internal static InitEvent? ParseMcpStatus(string line)
+    {
+        if (!line.Contains("control_response", StringComparison.Ordinal)) return null;
+        JsonNode? node;
+        try { node = JsonNode.Parse(line); }
+        catch (JsonException) { return null; }
+
+        if (node?["type"]?.ToString() != "control_response" || node["response"]?["response"]?["mcpServers"] is not JsonArray servers) return null;
+
+        var list = new List<(string Name, string Status)>();
+        var tools = new List<string>();
+        foreach (var server in servers)
+        {
+            var name = server?["name"]?.ToString();
+            if (string.IsNullOrEmpty(name)) continue;
+            var status = server?["status"]?.ToString() ?? "";
+            list.Add((name, status));
+
+            if (!status.Equals("connected", StringComparison.OrdinalIgnoreCase) || server?["tools"] is not JsonArray serverTools) continue;
+            var prefix = "mcp__" + Regex.Replace(name, "[^A-Za-z0-9_-]", "_") + "__";
+            tools.AddRange(serverTools.Select(t => t?["name"]?.ToString()).Where(n => !string.IsNullOrEmpty(n)).Select(n => prefix + n));
+        }
+        return new InitEvent(null, list, tools);
+    }
+
+    /// <summary>What a session's connector list says about the Gmail connector.</summary>
     internal static GmailConnectorStatus Evaluate(InitEvent init)
     {
         var gmail = init.McpServers.Where(s => s.Name.Contains("gmail", StringComparison.OrdinalIgnoreCase)).ToList();
@@ -194,30 +280,28 @@ public sealed class ClaudeMailReader : IMailReader
         Task<string> stderrTask = Task.FromResult("");
         try
         {
-            // The prompt goes through stdin: no command-line length or quoting limits.
-            await using (var stdin = new StreamWriter(process.StandardInput.BaseStream, new UTF8Encoding(false)))
-            {
-                await stdin.WriteAsync(MailScanPrompt.Build(request).AsMemory(), timeout.Token);
-            }
-
             stderrTask = process.StandardError.ReadToEndAsync(CancellationToken.None);
-            string? line;
-            while ((line = await process.StandardOutput.ReadLineAsync(timeout.Token)) != null)
+            var watch = new ConnectorWatch();
+            var reader = ReadSessionAsync(process, watch, r => result = r, timeout.Token);
+            var stdin = new StreamWriter(process.StandardInput.BaseStream, new UTF8Encoding(false)) { AutoFlush = true };
+
+            // Claude connects the account's connectors a few seconds after it starts, and a prompt sent before that is answered with no
+            // Gmail tools at all ("nothing found"). So the prompt goes in only once Gmail is connected; if it is not, nothing is sent.
+            var connectors = await AwaitConnectorsAsync(stdin, watch, reader, timeout.Token);
+            var ready = connectors == null ? null : Evaluate(connectors);
+            if (ready is { Ready: true })
             {
-                foreach (var evt in ClaudeStreamParser.Parse(line))
-                {
-                    if (evt is InitEvent init && !Evaluate(init).Ready)
-                    {
-                        // The connector dropped between the probe and this run: stop before Claude tries anything else.
-                        notReady = new MailReaderException(Evaluate(init).Detail, notReady: true);
-                        ClaudeCli.KillTree(process);
-                    }
-                    else if (evt is ResultEvent r)
-                    {
-                        result = r;
-                    }
-                }
+                var message = JsonSerializer.Serialize(new { type = "user", message = new { role = "user", content = MailScanPrompt.Build(request) } });
+                await stdin.WriteLineAsync(message.AsMemory(), timeout.Token);
+                stdin.Close();   // the session ends once it has answered
             }
+            else
+            {
+                notReady = new MailReaderException(ready?.Detail ?? "Claude Code did not say which connectors it has.", notReady: true);
+                ClaudeCli.KillTree(process);
+            }
+            await reader;
+            timeout.Token.ThrowIfCancellationRequested();   // the reader ends quietly when the run is stopped; the time limit must still be reported
         }
         catch (OperationCanceledException) when (timeout.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
         {
@@ -253,6 +337,7 @@ public sealed class ClaudeMailReader : IMailReader
         {
             "-p",
             "--output-format", "stream-json",
+            "--input-format", "stream-json",             // the prompt is sent once Gmail is connected (see ScanAsync)
             "--verbose",
             "--permission-mode", "dontAsk",              // never wait for an approval nobody can see: deny instead
             "--disable-slash-commands",

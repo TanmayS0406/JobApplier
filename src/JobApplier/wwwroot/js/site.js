@@ -430,7 +430,7 @@
                 if (!result.ok) { msg.textContent = result.error; $('gmail-connect').disabled = false; return; }
             } catch { msg.textContent = 'Could not reach the app.'; $('gmail-connect').disabled = false; return; }
 
-            msg.textContent = 'A Claude window opened. Choose claude.ai Gmail, then Authenticate (or type /mcp). This page notices by itself when it works.';
+            msg.textContent = 'A Claude window opened. Wait a few seconds for its prompt, type /mcp, choose claude.ai Gmail, then Authenticate. This page notices by itself when it works.';
             stopWaiting();
             let tries = 0;
             waiting = setInterval(async () => {
