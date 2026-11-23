@@ -161,3 +161,66 @@ public class GeminiStatusWarningTests
         finally { GeminiHealth.GoogleSignInRejected = false; }
     }
 }
+
+public class GeminiKeyPasteTests
+{
+    private const string Dotted = "AQ.Ab8RN6FAKE_exampleKey_0123456789";   // newer Google keys contain a dot
+    private const string Classic = "AIzaFAKE_exampleKey_0123456789ghij";
+
+    [Theory]
+    [InlineData(Dotted, true)]
+    [InlineData(Classic, true)]
+    [InlineData("a=b0123456789012345678901", false)]
+    [InlineData("a:b0123456789012345678901", false)]
+    [InlineData("a/b0123456789012345678901", false)]
+    public void Keys_of_the_old_and_the_new_shape_are_accepted_and_other_characters_are_not(string key, bool expected) =>
+        Assert.Equal(expected, GeminiCli.IsPlausibleKey(key));
+
+    [Theory]
+    [InlineData(Dotted)]
+    [InlineData("  " + Dotted + "  ")]
+    [InlineData("\"" + Dotted + "\"")]
+    [InlineData("GEMINI_API_KEY=" + Dotted)]
+    [InlineData("GEMINI_API_KEY=\"" + Dotted + "\"")]
+    [InlineData("export GEMINI_API_KEY=" + Dotted)]
+    [InlineData("export GEMINI_API_KEY=\"" + Dotted + "\"\r\n")]
+    [InlineData("set GOOGLE_API_KEY = " + Dotted)]
+    [InlineData("gemini_api_key=" + Dotted)]
+    public void A_key_is_found_in_whatever_was_copied_with_it(string pasted) =>
+        Assert.Equal(Dotted, GeminiCli.NormalizeKey(pasted));
+
+    [Fact]
+    public void A_pasted_line_with_the_variable_name_is_saved_as_the_key_alone()
+    {
+        using var env = new TestEnv();
+        var service = new GeminiAccountService(new SettingsService(env.Paths), env.Root, _ => null);
+
+        Assert.Null(service.SaveApiKey("export GEMINI_API_KEY=\"" + Dotted + "\""));
+
+        Assert.Equal(("GEMINI_API_KEY", Dotted), GeminiCli.ReadStoredApiKey(env.Root));
+    }
+
+    [Theory]
+    [InlineData(null, "nothing was pasted")]
+    [InlineData("", "nothing was pasted")]
+    [InlineData("two words 0123456789012345", "spaces or line breaks")]
+    [InlineData("teVw", "only 4 characters")]
+    [InlineData("a=b0123456789012345678901", "characters a key does not have")]
+    public void A_pasted_text_that_is_not_a_key_is_told_what_is_wrong_in_words_that_fit_it(string? pasted, string reason)
+    {
+        var message = GeminiAccountService.KeyShapeError(pasted);
+
+        Assert.StartsWith("That does not look like a Gemini API key", message);
+        Assert.Contains(reason, message);
+    }
+
+    [Fact]
+    public void The_cut_off_end_shown_in_AI_Studio_is_explained_and_never_echoed_back()
+    {
+        var message = GeminiAccountService.KeyShapeError("teVw")!;
+
+        Assert.Contains("copy button", message);
+        Assert.DoesNotContain("teVw", message);   // whatever was pasted might be a key
+        Assert.Null(GeminiAccountService.KeyShapeError(Dotted));
+    }
+}

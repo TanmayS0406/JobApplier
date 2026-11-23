@@ -83,7 +83,7 @@ public class SettingsController : Controller
     [HttpPost]
     public async Task<IActionResult> GeminiSaveKey([FromForm] string? key, CancellationToken cancellationToken)
     {
-        key = (key ?? "").Trim().Trim('"', '\'');
+        key = GeminiCli.NormalizeKey(key);
         if (GeminiAccountService.KeyShapeError(key) is { } shapeError) return Json(new { ok = false, message = shapeError });
 
         var check = await _geminiKeys.CheckAsync(key, cancellationToken);

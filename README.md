@@ -96,7 +96,7 @@ fill the form and ask you for help in the same way, and both are signed in with 
 * **Signing in to Gemini is three clicks at most.** In *Settings -> Gemini account*:
   1. **Install Gemini CLI** (only shown when it is missing) opens a window that runs `npm install -g @google/gemini-cli`; the page
      notices when it is done.
-  2. **Option A - paste an API key** (quickest): create a free key at <https://aistudio.google.com/apikey>, paste it and press *Save key*.
+  2. **Option A - paste an API key** (quickest): create a free key at <https://aistudio.google.com/apikey>, paste it and press *Save key*. Copy the whole key with the copy button on its row (AI Studio's list shows only the end of it); a pasted `GEMINI_API_KEY=...` line works too, and the newer key shape with a dot is accepted.
      The app first asks Google whether the key works (so a typo is caught immediately, and a refused key is never saved), then
      saves it as `GEMINI_API_KEY` in `~/.gemini/.env`, the file the Gemini CLI itself reads, so the CLI works the same outside this
      app. It is shown masked (`AIza...ghij`) and *Remove saved key* deletes it. If Google cannot be reached the key is saved

@@ -25,8 +25,21 @@ public static class GeminiCli
     /// <summary>Environment variables the CLI reads an API key from, in the order they are checked here.</summary>
     public static readonly string[] ApiKeyVariables = { "GEMINI_API_KEY", "GOOGLE_API_KEY" };
 
-    // Gemini keys are "AIza" plus 35 characters; anything shaped like a token is accepted so a new key format does not need a release.
-    private static readonly Regex PlausibleKey = new(@"^[A-Za-z0-9_\-]{20,128}$", RegexOptions.CultureInvariant);
+    // Gemini keys used to be "AIza" plus 35 characters; newer Google keys have another shape and contain a dot ("AQ.Ab8..."). Anything shaped
+    // like a token is accepted so a new key format does not need a release.
+    private static readonly Regex PlausibleKey = new(@"^[A-Za-z0-9_\-.]{20,128}$", RegexOptions.CultureInvariant);
+
+    private static readonly Regex KeyAssignment = new(@"^(?:export\s+|set\s+)?(?:GEMINI_API_KEY|GOOGLE_API_KEY)\s*=\s*", RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
+
+    /// <summary>
+    /// The key itself, whichever way it was copied: with spaces or quotes around it, or as the whole line <c>GEMINI_API_KEY=...</c> /
+    /// <c>export GEMINI_API_KEY="..."</c> / <c>set GEMINI_API_KEY=...</c> from a terminal or an .env file.
+    /// </summary>
+    public static string NormalizeKey(string? pasted)
+    {
+        var text = (pasted ?? "").Trim().Trim('"', '\'');
+        return KeyAssignment.Replace(text, "").Trim().Trim('"', '\'');
+    }
 
     /// <summary>Resolves the CLI from the configured path, PATH, or the npm global folder. Null when not found.</summary>
     public static string? Locate(string? configuredPath)

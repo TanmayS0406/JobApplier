@@ -98,7 +98,7 @@ public sealed class GeminiAccountService
     /// </summary>
     public string? SaveApiKey(string? key)
     {
-        key = (key ?? "").Trim().Trim('"', '\'');
+        key = GeminiCli.NormalizeKey(key);
         if (KeyShapeError(key) is { } shapeError) return shapeError;
         try
         {
@@ -112,10 +112,20 @@ public sealed class GeminiAccountService
     }
 
     /// <summary>What is wrong with the look of a pasted key, or null when it could be one.</summary>
-    public static string? KeyShapeError(string? key) =>
-        GeminiCli.IsPlausibleKey(key)
-            ? null
-            : "That does not look like a Gemini API key. It is one string of letters, digits, - and _ (about 39 characters, starting with AIza).";
+    public static string? KeyShapeError(string? key)
+    {
+        if (GeminiCli.IsPlausibleKey(key)) return null;
+
+        // Says what is wrong without repeating any of the text: it may be a key.
+        key ??= "";
+        const string start = "That does not look like a Gemini API key";
+        if (key.Length == 0) return start + ": nothing was pasted.";
+        if (key.Any(char.IsWhiteSpace)) return start + ": it contains spaces or line breaks. A key is one string; copy only the key.";
+        if (key.Length < 20)
+            return start + $": it is only {key.Length} characters. AI Studio's key list shows just the end of each key (like ...x9Zq); use the copy button on the key's row to copy the whole key.";
+        if (key.Length > 128) return start + ": it is far longer than a key. Copy only the key.";
+        return start + ": it contains characters a key does not have (such as = : / or quotes). Copy only the key itself.";
+    }
 
     /// <summary>Removes the key this app saved. Returns an error message, or null (also when there was none).</summary>
     public string? RemoveApiKey()
