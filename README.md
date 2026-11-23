@@ -42,6 +42,7 @@ server.
 |---|---|
 | .NET 10 SDK | to build and run |
 | Node.js 18+ | runs `npx @playwright/mcp` |
+| SQL Server | the free *Express* edition or *LocalDB* is enough. It holds the jobs and the job queue (see *The database and the queue*) |
 | Google Chrome (or Edge) | the browser the agent drives |
 | Claude Code CLI | <https://claude.com/claude-code> - needs a Claude Pro / Max / Team / Enterprise login |
 | *or* Gemini CLI | installed with one click from Settings (or `npm install -g @google/gemini-cli`) - then paste a Gemini API key or sign in with Google |
@@ -53,6 +54,40 @@ dotnet run --project src/JobApplier
 ```
 
 It listens on <http://127.0.0.1:5189> only (never on the network) and opens your browser.
+
+### The database and the queue
+
+Jobs are stored in SQL Server (through EF Core) and run from a Hangfire queue kept in the same database, so closing the app loses
+nothing. **Every start applies the database migrations by itself**: the `JobApplier` database is created if it is missing and brought
+up to the current schema, then Hangfire creates its own tables (schema `HangFire`) next to it. Nothing to run by hand.
+
+The connection string is `ConnectionStrings:JobApplier` in `appsettings.json`; it defaults to the Express instance on this PC with
+your Windows login:
+
+```
+Server=localhost\SQLEXPRESS;Database=JobApplier;Trusted_Connection=True;TrustServerCertificate=True;Encrypt=False
+```
+
+Point it elsewhere with the environment variable `ConnectionStrings__JobApplier`, for example LocalDB:
+`Server=(localdb)\MSSQLLocalDB;Database=JobApplier;Trusted_Connection=True`. If the database cannot be reached the app stops at start-up
+and says which setting to check.
+
+* **Closed or killed in the middle of work?** Start it again: every job that was not finished goes back in the queue, oldest first, and
+  continues **from the stage it had reached** (reading the screenshot, finding the posting and scoring are stored on the job and are not
+  redone). A job that was filling in a form starts that stage again; if the application had already gone through, the site says so and it
+  is recorded as applied.
+* **Out of tokens?** The job that hit the limit waits for the reset and **continues by itself**, with nothing to press: a recurring Hangfire
+  check looks every minute, and the wait survives restarts. Jobs that have not started are held back until the limit is over, so they do
+  not all fail the same way.
+* **The queue dashboard** (*Queue* in the menu, or <http://127.0.0.1:5189/hangfire>) shows what is waiting, running or scheduled for after a
+  limit. It is reachable from this PC only.
+* **Changing the data model?** Add a migration, and the next start applies it:
+  `dotnet ef migrations add <Name> --project src/JobApplier --output-dir Persistence/Migrations`.
+* **Coming from an earlier version?** The first start imports your old `jobs/<id>/job.json` files into the database and renames each to
+  `job.json.imported` (kept as a backup, never read again). A job the old version had left unfinished comes in as *Failed
+  (interrupted)* and is **not** restarted by itself - the file can be days old and there is no way to know whether its application went
+  through - so press Retry on it if you want it continued. The profile, settings, accounts and applications stay as the JSON files
+  they were.
 
 First run:
 
@@ -146,16 +181,16 @@ fill the form and ask you for help in the same way, and both are signed in with 
 * **Passwords never reach the model.** The app generates a strong 16-character password per site and hands it to Playwright
   through its `--secrets` file. The agent only ever types the *name* `JOB_PASSWORD`; Playwright substitutes the real value
   inside the browser tool, and tool output is redacted. The password is also masked from the job log and never written to
-  `job.json`. If a later job uses a site that already has an account, the saved password is reused and the agent signs in.
+  the database. If a later job uses a site that already has an account, the saved password is reused and the agent signs in.
 * **Human in the loop.** `wait_for_user` returns after at most 45 s with *not yet*, and the agent calls it again. It must stay
   under the Claude CLI's own 60 s limit for a tool call: a longer wait is aborted by the client, which then re-asks on its own
   and can lose your answer. A wait can last as long as you need (default limit 45 min, then the job gives up).
 * **English only.** Everything a job asks you - the *Needs you* card, form questions, summaries - is written in English, even
   when the employer's site is in Spanish or another language. The agent translates the question (and its options) for you and
   translates your answer back into the form's language.
-* **Clearing failed jobs.** Every job is kept until you delete it, and a job that was running when the app stopped shows as
-  *Failed (interrupted)*. *Clear failed* in the Results header deletes all *Failed* jobs and their files at once (after a
-  confirmation). Running and queued jobs, other results, accounts and the applications list are not touched.
+* **Clearing failed jobs.** Every job is kept until you delete it. *Clear failed* in the Results header deletes all *Failed* jobs and
+  their files at once (after a confirmation). Running and queued jobs, jobs waiting for a usage limit, other results, accounts and the
+  applications list are not touched. (A job that was running when the app stopped is not failed: it continues when the app starts.)
 * **Retry all failed.** The button in the Results header queues every *Failed* job again, oldest first (a few at a time, as set in
   Settings); finished stages are kept and *Applied* jobs are never touched. If a limit is still in force the jobs fail again and
   the queue is held back, so nothing is lost by pressing it early - *Retry when available* is the patient version.
@@ -168,12 +203,13 @@ fill the form and ask you for help in the same way, and both are signed in with 
   the automatic retry uses them later. *Apply anyway* still ignores the minimum.
 * **Usage limits.** If the AI runs out of tokens or quota (Claude's "5-hour / weekly limit reached", Gemini's "429 RESOURCE_EXHAUSTED" and
   similar), the job is marked *usage limit* instead of just *Failed*, with the reset time when the error gives one. New jobs that
-  have not started yet are held back until then (a banner says so) instead of all failing the same way. On the job page or the
-  dashboard, **Retry when available** makes the job retry by itself once the limit has reset - also after an app restart, because
-  the state is saved. If no reset time was given it probes again after 3, 10, 20, 30 then 60 minutes, and gives up after 8
-  automatic attempts. **Stop waiting** cancels it; **Retry now** retries immediately. Waiting jobs are never removed by *Clear
-  failed*. A limit during the Apply step may happen after the form was already submitted, so the job says to check the employer's
-  site before retrying.
+  have not started yet are held back until then (a banner says so, and they are scheduled in Hangfire for after it) instead of all
+  failing the same way. **The job that hit the limit retries by itself once the limit has reset**, continuing from the stage it
+  stopped at - no button to press, and also after an app restart, because the state is saved in the database. If no reset time was
+  given it probes again after 3, 10, 20, 30 then 60 minutes (hourly after that), and gives up after 200 automatic attempts (about a
+  week). **Stop waiting** cancels it; **Retry now** retries immediately. *Retry when available* is still there for a job you stopped
+  waiting for. Waiting jobs are never removed by *Clear failed*. A limit during the Apply step may happen after the form was already
+  submitted, so the job says to check the employer's site before retrying.
 * **Resumable.** Finished stages are stored on the job. *Retry* continues from the stage that failed; a *not found* job searches
   again. An *Applied* job can never be retried.
 * **No double applications.** Two jobs for the same posting (same URL, ignoring tracking parameters) never both submit: the
@@ -284,7 +320,10 @@ How it works, and what to know:
 
 ## Where things are stored
 
-`%LOCALAPPDATA%\JobApplier` (override with `JobApplier:DataFolder`):
+The jobs and the queue are in the SQL Server database (see *The database and the queue*): the `Jobs` table holds each job - its status,
+the results of each stage and the log (passwords are never stored) - and Hangfire's tables are in the `HangFire` schema.
+
+The files are in `%LOCALAPPDATA%\JobApplier` (override with `JobApplier:DataFolder`):
 
 ```
 settings.json  profile.json  accounts.json  applications.json
@@ -292,7 +331,7 @@ replies.json  mail-state.json   employer replies found in Gmail, and whether tra
 resume-advice.json           the last advice of the resume coach (Insights)
 mail-workspace/              an empty folder the mailbox reader runs in
 resume/                      your resume copy
-jobs/<id>/job.json           the job: results, log (passwords never included)
+jobs/<id>/job.json.imported  the job as an earlier version saved it (only if you upgraded; a backup, no longer read)
 jobs/<id>/screenshot.*       the uploaded image
 jobs/<id>/workspace/         the agent's working folder (screenshot, resume copy, browser output)
 jobs/<id>/private/           MCP config + secrets file - outside the workspace, so the agent cannot read it
@@ -337,8 +376,10 @@ src/JobApplier/
               MailWatcher, ReplyStore
   Insights/   resume gap analysis: SkillNormalizer, TF-IDF + K-Means (ML.NET), calibration + coverage plan (Math.NET), ResumeCoach
   Mcp/        JobMcpServer - wait_for_user, record_account, report_progress
-  Services/   JobRunner (queue, usage-limit hold + auto-retry), JobStore, HumanHelpBroker, AccountService + AccountsDocument (.docx),
-              ProfileService/Importer, Claude/GeminiAccountService, ...
+  Persistence/ the EF Core model (JobApplierDbContext), Migrations/, EfJobPersistence, start-up migration, import of the old job.json files
+  Services/   JobRunner (the Hangfire job: parallel limit, usage-limit hold + auto-retry, resume after a restart), JobQueue (Hangfire),
+              JobStore, HumanHelpBroker, AccountService + AccountsDocument (.docx), ProfileService/Importer,
+              Claude/GeminiAccountService, ...
   Controllers/ Views/ wwwroot/   the dashboard, job details, profile and settings pages
 tests/JobApplier.Tests/   xUnit
 ```
@@ -351,7 +392,10 @@ dotnet test
 
 The unit tests cover password generation and redaction, the stream parser, the MCP protocol, the help broker, the Word document
 writer, account reuse, the duplicate guard, the JSON schemas the CLI accepts, and how the Agent Framework routes messages
-between stages. The Gmail part is covered against a fake `claude` CLI (a script that answers from a scenario file and records how it was
+between stages. The queue is covered without any AI agent or SQL Server: the EF mapping runs on a throw-away SQLite file per test,
+Hangfire is replaced by a recording queue, and the tests check queuing, cancelling, the parallel limit, a limit that ends and brings
+the job back, the app being closed mid-run, and a restart that continues from the stage reached. Separate tests check that the
+migrations match the model and never use the `json` column type that SQL Server 2022 lacks. The Gmail part is covered against a fake `claude` CLI (a script that answers from a scenario file and records how it was
 called): the connector probe, the read-only tool restriction and the exact arguments of a scan, a connector that needs sign-in or
 drops out, usage limits, timeouts, and what is accepted from Claude's answer.
 

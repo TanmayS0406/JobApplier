@@ -1,54 +1,95 @@
 using System.Collections.Concurrent;
-using System.Threading.Channels;
+using Hangfire;
 using JobApplier.Agents;
-using JobApplier.Claude;
 using JobApplier.Domain;
 using JobApplier.Infrastructure;
-using Microsoft.Agents.AI.Workflows;
 
 namespace JobApplier.Services;
 
 /// <summary>
-/// Background engine. Jobs are queued and up to <see cref="AppSettings.MaxParallelJobs"/> run at the same time, each as its own
-/// Agent Framework workflow with its own Claude process and its own visible browser window.
+/// Runs the jobs. Every job is a Hangfire background job (<see cref="RunQueuedJobAsync"/>), so the queue lives in the SQL Server database:
+/// closing the app does not lose it, and <see cref="RecoverAfterRestart"/> puts what was unfinished back in line, to continue from the
+/// stage it had reached (each finished stage is stored on the job). Up to <see cref="AppSettings.MaxParallelJobs"/> run at the same time,
+/// each as its own Agent Framework workflow with its own Claude process and its own visible browser window.
+/// When the AI runs out of tokens, the job that hit the limit waits for the reset and continues by itself (see <see cref="ArmAutoRetry"/>).
 /// </summary>
-public sealed class JobRunner : BackgroundService
+public sealed class JobRunner
 {
     private readonly JobStore _store;
     private readonly HumanHelpBroker _help;
     private readonly SettingsService _settings;
     private readonly PipelineServices _pipeline;
+    private readonly IJobQueue _queue;
+    private readonly IHostApplicationLifetime? _lifetime;
     private readonly ILogger<JobRunner> _logger;
 
-    /// <summary>Automatic retries per job for one usage limit; after that the job is left for the user (a long outage must not loop forever).</summary>
-    public const int MaxAutoRetries = 8;
+    /// <summary>
+    /// Automatic retries per job for one usage limit; after that the job is left for the user. Generous on purpose: a limit whose reset time is not
+    /// known is probed again every hour once the pauses have grown, which reaches the longest real limit (a week) well inside this number.
+    /// </summary>
+    public const int MaxAutoRetries = 200;
 
     /// <summary>A little after the stated reset time, so the first request does not land on the last second of the limit.</summary>
     private static readonly TimeSpan ResetMargin = TimeSpan.FromSeconds(60);
 
-    private readonly Channel<Guid> _queue = Channel.CreateUnbounded<Guid>();
-    private readonly ConcurrentDictionary<Guid, CancellationTokenSource> _active = new();
-    private int _running;
+    private readonly ConcurrentDictionary<Guid, PendingJob> _active = new();
+    private readonly SlotGate _slots = new();
     private long _pausedUntilTicks;
 
-    public JobRunner(JobStore store, HumanHelpBroker help, SettingsService settings, PipelineServices pipeline, ILogger<JobRunner> logger)
+    public JobRunner(JobStore store, HumanHelpBroker help, SettingsService settings, PipelineServices pipeline, IJobQueue queue,
+        ILogger<JobRunner> logger, IHostApplicationLifetime? lifetime = null)
     {
         _store = store;
         _help = help;
         _settings = settings;
         _pipeline = pipeline;
+        _queue = queue;
         _logger = logger;
+        _lifetime = lifetime;
+        RunWorkflow = (jobId, cancellationToken) => JobWorkflow.RunAsync(JobWorkflow.Build(_pipeline), jobId, cancellationToken);
     }
 
-    /// <summary>Queues a job. Returns false if it is already queued or running.</summary>
+    /// <summary>What a worker runs for a job: the whole pipeline. The tests replace it, so the runner can be exercised without an AI agent.</summary>
+    internal Func<Guid, CancellationToken, Task> RunWorkflow { get; set; }
+
+    /// <summary>The current time (UTC). The tests move it forward to "wait" for a usage limit to end.</summary>
+    internal Func<DateTime> Clock { get; set; } = () => DateTime.UtcNow;
+
+    /// <summary>
+    /// A job this process owes a run. It is waiting in the queue, running, or put back in the queue for later (usage limit). Cancelling it
+    /// while it still waits takes it out of the queue; once a worker has it, cancelling stops the run.
+    /// </summary>
+    private sealed class PendingJob : IDisposable
+    {
+        private const int InQueue = 0, WithWorker = 1, Revoked = 2;
+        private int _state;
+
+        public CancellationTokenSource Cts { get; } = new();
+
+        /// <summary>A worker takes the job. False when it was cancelled in the meantime, or another worker already has it.</summary>
+        public bool TryPickUp() => Interlocked.CompareExchange(ref _state, WithWorker, InQueue) == InQueue;
+
+        /// <summary>The job is cancelled before any worker took it. False when a worker has it (it then stops the run itself).</summary>
+        public bool TryRevoke() => Interlocked.CompareExchange(ref _state, Revoked, InQueue) == InQueue;
+
+        /// <summary>The worker hands the job back: it is queued again for later.</summary>
+        public void PutBack() => Volatile.Write(ref _state, InQueue);
+
+        public void Dispose() => Cts.Dispose();
+    }
+
+    /// <summary>
+    /// Queues a job. Returns false if it is already queued or running (or gone). The job is marked queued before the queue is told, so a
+    /// worker that picks it up at once cannot be overwritten by that mark.
+    /// </summary>
     public bool Enqueue(Guid jobId)
     {
         if (!_store.Exists(jobId)) return false;
 
-        var cts = new CancellationTokenSource();
-        if (!_active.TryAdd(jobId, cts))
+        var pending = new PendingJob();
+        if (!_active.TryAdd(jobId, pending))
         {
-            cts.Dispose();
+            pending.Dispose();
             return false;
         }
 
@@ -57,9 +98,23 @@ public sealed class JobRunner : BackgroundService
             r.Status = JobStatus.Queued;
             r.StatusDetail = "Waiting for a free slot";
             r.PendingHelp = null;
+            r.QueueId = null;
         });
-        _queue.Writer.TryWrite(jobId);
-        return true;
+
+        try
+        {
+            var queueId = _queue.Enqueue(jobId);
+            _store.Update(jobId, r => r.QueueId ??= queueId);
+            return true;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogError(ex, "Could not queue job {JobId}", jobId);
+            if (_active.TryRemove(jobId, out var removed)) removed.Dispose();
+            _store.SetStatus(jobId, JobStatus.Failed, "Could not be put in the queue: " + ex.Message + " Press Retry.");
+            _store.Log(jobId, "error", "Could not be put in the queue: " + ex.Message);
+            return false;
+        }
     }
 
     /// <summary>
@@ -112,6 +167,45 @@ public sealed class JobRunner : BackgroundService
         return ids.Count(id => !IsActive(id) && Retry(id, options: options));
     }
 
+    // ---- restart ----
+
+    /// <summary>
+    /// Called once when the app starts. Every job that was not finished when the app was closed (waiting, or in the middle of a stage) goes back
+    /// in the queue, oldest first, and continues from the stage it had reached. Whatever the previous run left in Hangfire for those jobs is
+    /// removed first, so each job is queued exactly once however the app ended (closed normally, or killed). The hold on new jobs is restored
+    /// too if a usage limit was still in force. Returns how many jobs were put back in the queue.
+    /// </summary>
+    public int RecoverAfterRestart()
+    {
+        var stillLimited = _store.ReadAll(r => (r.WaitingForLimitReset, r.RetryAfterUtc))
+            .Where(j => j.WaitingForLimitReset && j.RetryAfterUtc > Clock())
+            .Select(j => j.RetryAfterUtc)
+            .Max();
+        if (stillLimited != null) NoteUsageLimit(stillLimited);
+
+        var unfinished = _store.ReadAll(r => (r.Id, r.Status, r.QueueId, r.CreatedUtc))
+            .Where(j => !j.Status.IsTerminal())
+            .OrderBy(j => j.CreatedUtc)
+            .ToList();
+
+        var queued = 0;
+        foreach (var job in unfinished)
+        {
+            if (job.QueueId != null) _queue.Delete(job.QueueId);
+            _store.Update(job.Id, r => r.QueueId = null);
+
+            if (job.Status != JobStatus.Queued)
+            {
+                _store.Log(job.Id, "info", $"JobApplier was closed while this job was at \"{job.Status.Label()}\". It continues from the stage it had reached." +
+                    (job.Status == JobStatus.Applying ? " If the application had already gone through, the site will say so and it is recorded as applied." : ""));
+            }
+            if (Enqueue(job.Id)) queued++;
+        }
+
+        if (queued > 0) _logger.LogInformation("Put {Count} unfinished job(s) back in the queue.", queued);
+        return queued;
+    }
+
     // ---- usage limits ----
 
     /// <summary>
@@ -123,14 +217,14 @@ public sealed class JobRunner : BackgroundService
         get
         {
             var ticks = Interlocked.Read(ref _pausedUntilTicks);
-            return ticks > DateTime.UtcNow.Ticks ? new DateTime(ticks, DateTimeKind.Utc) : null;
+            return ticks > Clock().Ticks ? new DateTime(ticks, DateTimeKind.Utc) : null;
         }
     }
 
     /// <summary>Holds back new jobs until the limit should be over (plus a small margin). A later, longer limit wins; a shorter one never shortens it.</summary>
     public void NoteUsageLimit(DateTime? resetUtc)
     {
-        var now = DateTime.UtcNow;
+        var now = Clock();
         var until = (resetUtc ?? now + UsageLimit.Backoff(0)) + ResetMargin;
         if (until > now.AddDays(8)) until = now.AddDays(8);
 
@@ -148,6 +242,7 @@ public sealed class JobRunner : BackgroundService
     /// <summary>
     /// Marks a limit-hit job to be retried automatically once the limit has reset. False when it is not such a job. The choices of the
     /// retry dialog are saved on the job now: the retry itself happens later, by itself, with whatever the job holds then.
+    /// A job that hits a usage limit while running is armed by the runner at once, so nobody has to be there when the limit ends.
     /// </summary>
     public bool ArmAutoRetry(Guid jobId, RetryOptions? options = null)
     {
@@ -187,9 +282,9 @@ public sealed class JobRunner : BackgroundService
     }
 
     /// <summary>
-    /// Re-queues the armed jobs whose limit should be over. Called every few seconds; also after a restart, because the flag lives in
-    /// <c>job.json</c>. Nothing is retried while new jobs are being held back, and a job that keeps hitting the limit is given up on
-    /// after <see cref="MaxAutoRetries"/> attempts. Returns how many were re-queued.
+    /// Re-queues the armed jobs whose limit should be over. Runs every minute as a recurring Hangfire job (<see cref="CheckDueRetries"/>), and
+    /// the armed state lives in the database, so jobs keep being watched across restarts. Nothing is retried while new jobs are being held back,
+    /// and a job that keeps hitting the limit is given up on after <see cref="MaxAutoRetries"/> attempts. Returns how many were re-queued.
     /// </summary>
     internal int RetryDueJobs(DateTime nowUtc)
     {
@@ -217,86 +312,94 @@ public sealed class JobRunner : BackgroundService
         return started;
     }
 
+    /// <summary>The recurring Hangfire job that keeps listening for the end of a usage limit.</summary>
+    [AutomaticRetry(Attempts = 0)]
+    [Queue(JobQueues.Default)]
+    public void CheckDueRetries()
+    {
+        try
+        {
+            RetryDueJobs(Clock());
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogError(ex, "Automatic retry check failed"); // one bad pass must not end the checks
+        }
+    }
+
+    // ---- cancel / state ----
+
     public void Cancel(Guid jobId)
     {
-        if (_active.TryGetValue(jobId, out var cts))
+        if (_active.TryGetValue(jobId, out var pending))
         {
-            try { cts.Cancel(); } catch (ObjectDisposedException) { /* finished just now */ }
+            try { pending.Cts.Cancel(); } catch (ObjectDisposedException) { /* finished just now */ }
+
+            // No worker has it yet: take it out of the queue and finish it here. A worker that has it stops the run itself.
+            if (pending.TryRevoke())
+            {
+                if (_store.Read(jobId, r => r.QueueId) is { } queueId) _queue.Delete(queueId);
+                _store.SetStatus(jobId, JobStatus.Cancelled, "Cancelled before it started.");
+                _store.Log(jobId, "info", "Cancelled.");
+                if (_active.TryRemove(new KeyValuePair<Guid, PendingJob>(jobId, pending))) pending.Dispose();
+            }
         }
         _help.CancelJob(jobId);
     }
 
+    /// <summary>True while the job is queued or running (including a job put back in the queue until a usage limit is over).</summary>
     public bool IsActive(Guid jobId) => _active.ContainsKey(jobId);
 
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
-    {
-        _ = Task.Run(() => AutoRetryLoopAsync(stoppingToken), CancellationToken.None);
+    // ---- the Hangfire job ----
 
+    /// <summary>
+    /// What Hangfire runs for a queued job. Not called by anything else. A queue entry that no longer has work (the job was cancelled, deleted, or
+    /// already has a worker) does nothing. <paramref name="shutdown"/> is Hangfire's token for the server stopping.
+    /// </summary>
+    [AutomaticRetry(Attempts = 0)]
+    [Queue(JobQueues.Jobs)]
+    public async Task RunQueuedJobAsync(Guid jobId, CancellationToken shutdown)
+    {
+        if (!_active.TryGetValue(jobId, out var pending) || !pending.TryPickUp()) return;
+
+        var queuedAgain = false;
         try
         {
-            while (await _queue.Reader.WaitToReadAsync(stoppingToken))
-            {
-                // The AI is out of tokens: leave the job in the queue until the limit should be over.
-                while (PausedUntilUtc != null)
-                    await Task.Delay(1000, stoppingToken);
-
-                // The limit is read every time, so changing it in Settings applies to the next job without a restart.
-                while (Volatile.Read(ref _running) >= _settings.Current.MaxParallelJobs)
-                    await Task.Delay(250, stoppingToken);
-
-                if (!_queue.Reader.TryRead(out var jobId)) continue;
-                if (!_active.TryGetValue(jobId, out var cts)) continue;
-
-                Interlocked.Increment(ref _running);
-                _ = Task.Run(() => RunJobAsync(jobId, cts, stoppingToken), CancellationToken.None);
-            }
+            queuedAgain = await RunAsync(jobId, pending, shutdown);
         }
-        catch (OperationCanceledException)
+        finally
         {
-            // shutting down
+            if (!queuedAgain) Finish(jobId, pending);
         }
     }
 
-    private async Task AutoRetryLoopAsync(CancellationToken stoppingToken)
+    /// <summary>Returns true when the job was put back in the queue for later instead of being run.</summary>
+    private async Task<bool> RunAsync(Guid jobId, PendingJob pending, CancellationToken shutdown)
     {
+        // Removed, or finished some other way, since it was queued.
+        if (!_store.Exists(jobId) || _store.Read(jobId, r => r.Status.IsTerminal())) return false;
+
+        if (PausedUntilUtc is { } hold && Defer(jobId, pending, hold)) return true;
+
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(pending.Cts.Token, shutdown);
+        SlotGate.Lease? slot = null;
+        var started = false;
         try
         {
-            using var timer = new PeriodicTimer(TimeSpan.FromSeconds(20));
-            while (await timer.WaitForNextTickAsync(stoppingToken))
-            {
-                try
-                {
-                    RetryDueJobs(DateTime.UtcNow);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "Automatic retry check failed"); // never let one bad pass end the loop
-                }
-            }
-        }
-        catch (OperationCanceledException)
-        {
-            // shutting down
-        }
-    }
+            slot = await _slots.EnterAsync(() => _settings.Current.MaxParallelJobs, linked.Token);
 
-    private async Task RunJobAsync(Guid jobId, CancellationTokenSource cts, CancellationToken appStopping)
-    {
-        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cts.Token, appStopping);
-        try
-        {
-            if (linked.IsCancellationRequested)
-            {
-                _store.SetStatus(jobId, JobStatus.Cancelled, "Cancelled before it started.");
-                return;
-            }
+            // A job that ran while this one waited for its slot may have used up the tokens.
+            if (PausedUntilUtc is { } laterHold && Defer(jobId, pending, laterHold)) return true;
 
+            started = true;
             _store.Log(jobId, "info", "Started.");
-            await JobWorkflow.RunAsync(JobWorkflow.Build(_pipeline), jobId, linked.Token);
+            await RunWorkflow(jobId, linked.Token);
         }
         catch (OperationCanceledException)
         {
-            _store.SetStatus(jobId, JobStatus.Cancelled, "Cancelled.");
+            // The user cancelling is final; the app closing is not (see AfterRun).
+            if (pending.Cts.IsCancellationRequested || !Stopping(shutdown))
+                _store.SetStatus(jobId, JobStatus.Cancelled, started ? "Cancelled." : "Cancelled before it started.");
         }
         catch (Exception ex)
         {
@@ -306,27 +409,76 @@ public sealed class JobRunner : BackgroundService
         }
         finally
         {
-            _help.CancelJob(jobId);
+            slot?.Dispose();
+        }
 
-            // Whatever happened, a job must not stay "running" once its workflow is gone.
-            if (!_store.Read(jobId, r => r.Status).IsTerminal())
-                _store.SetStatus(jobId, JobStatus.Failed, "Stopped unexpectedly. Press Retry.");
+        AfterRun(jobId, pending, shutdown);
+        return false;
+    }
 
-            try { File.Delete(Path.Combine(_pipeline.Paths.PrivateFolder(jobId), "secrets.env")); } catch (IOException) { /* gone with the job */ }
+    private void AfterRun(Guid jobId, PendingJob pending, CancellationToken shutdown)
+    {
+        if (!_store.Exists(jobId)) return;
 
-            _active.TryRemove(jobId, out _);
-            cts.Dispose();
-            Interlocked.Decrement(ref _running);
+        // The app is closing: whatever stopped this job (the Claude process being killed, the cancellation) was the shutdown, not the job.
+        // It is left queued; the next start puts it back in line and it continues from the stage it had reached.
+        if (Stopping(shutdown) && !pending.Cts.IsCancellationRequested && _store.Read(jobId, r => CutShortByShutdown(r)))
+        {
+            _store.Update(jobId, r =>
+            {
+                r.Status = JobStatus.Queued;
+                r.StatusDetail = "Paused because JobApplier was closed. It continues from where it stopped the next time JobApplier starts.";
+                r.PendingHelp = null;
+            });
+            _store.Log(jobId, "info", "JobApplier was closed. This job continues from where it stopped when JobApplier starts again.");
+            return;
+        }
+
+        // Whatever happened, a job must not stay "running" once its workflow is gone.
+        if (!_store.Read(jobId, r => r.Status).IsTerminal())
+            _store.SetStatus(jobId, JobStatus.Failed, "Stopped unexpectedly. Press Retry.");
+
+        // Out of tokens: nothing is wrong with the job, so it waits for the reset and goes on by itself.
+        ArmAutoRetry(jobId);
+    }
+
+    private static bool CutShortByShutdown(JobRecord job) =>
+        !job.Status.IsTerminal() || job.Status == JobStatus.Cancelled || (job.Status == JobStatus.Failed && !job.LimitHit);
+
+    private bool Stopping(CancellationToken shutdown) =>
+        shutdown.IsCancellationRequested || (_lifetime?.ApplicationStopping.IsCancellationRequested ?? false);
+
+    /// <summary>The usage limit is in force: this job goes back in the queue for when it should be over, and waits there without holding a worker.</summary>
+    private bool Defer(Guid jobId, PendingJob pending, DateTime untilUtc)
+    {
+        pending.PutBack();
+        try
+        {
+            var queueId = _queue.Schedule(jobId, untilUtc);
+            _store.Update(jobId, r =>
+            {
+                r.Status = JobStatus.Queued;
+                r.QueueId = queueId;
+                r.StatusDetail = "Waiting for the AI usage limit to reset, " + UsageLimit.Describe(untilUtc, Clock()) + ". It starts by itself.";
+            });
+            return true;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Could not be put back: run it. It fails on the limit the same way and then waits as an armed job.
+            _logger.LogWarning(ex, "Could not schedule job {JobId} for after the usage limit", jobId);
+            pending.TryPickUp();
+            return false;
         }
     }
 
-    public override async Task StopAsync(CancellationToken cancellationToken)
+    private void Finish(Guid jobId, PendingJob pending)
     {
-        foreach (var cts in _active.Values)
-        {
-            try { cts.Cancel(); } catch (ObjectDisposedException) { /* already finished */ }
-        }
-        ClaudeCli.KillAll(); // Claude -> Playwright MCP -> browser windows
-        await base.StopAsync(cancellationToken);
+        _help.CancelJob(jobId);
+
+        try { File.Delete(Path.Combine(_pipeline.Paths.PrivateFolder(jobId), "secrets.env")); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* gone with the job */ }
+
+        if (_active.TryRemove(new KeyValuePair<Guid, PendingJob>(jobId, pending))) pending.Dispose();
     }
 }

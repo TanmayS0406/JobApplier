@@ -1,45 +1,42 @@
 using System.Collections.Concurrent;
+using JobApplier.Persistence;
 using JobApplier.Domain;
 using JobApplier.Infrastructure;
 
 namespace JobApplier.Services;
 
 /// <summary>
-/// In-memory source of truth for jobs, flushed to <c>jobs/&lt;id&gt;/job.json</c> about once a second.
+/// In-memory source of truth for jobs, written to the database (<see cref="IJobPersistence"/>) about once a second.
 /// Jobs are mutated by background workers while the UI reads them, so every access goes through
 /// <see cref="Update"/> / <see cref="Read{T}"/>, which lock the individual record.
+/// The files of a job (its screenshot, the agent's workspace) stay in its folder under the data folder.
 /// </summary>
 public sealed class JobStore : BackgroundService
 {
     private const int MaxLogEntries = 600;
 
     private readonly AppPaths _paths;
+    private readonly IJobPersistence _persistence;
     private readonly ILogger<JobStore> _logger;
     private readonly ConcurrentDictionary<Guid, JobRecord> _jobs = new();
     private readonly ConcurrentDictionary<Guid, byte> _dirty = new();
 
-    public JobStore(AppPaths paths, ILogger<JobStore> logger)
+    public JobStore(AppPaths paths, IJobPersistence persistence, ILogger<JobStore> logger)
     {
         _paths = paths;
+        _persistence = persistence;
         _logger = logger;
         LoadAll();
     }
 
+    /// <summary>
+    /// Loads what the database holds. A job that was still running when the app stopped is left as it was: <see cref="JobRunner.RecoverAfterRestart"/>
+    /// puts it back in the queue, and it continues from the stage it had reached.
+    /// </summary>
     private void LoadAll()
     {
-        foreach (var folder in Directory.GetDirectories(_paths.JobsRoot))
+        foreach (var record in _persistence.LoadAll())
         {
-            var record = JsonFile.Read<JobRecord>(Path.Combine(folder, "job.json"));
-            if (record == null) continue;
-
-            if (!record.Status.IsTerminal())
-            {
-                // The process that was working on it is gone.
-                record.Status = JobStatus.Failed;
-                record.StatusDetail = "Interrupted: the app was restarted while this job was running. Press Retry to continue.";
-                record.PendingHelp = null;
-                _dirty[record.Id] = 0;
-            }
             if (UpgradeLegacyLimitFailure(record)) _dirty[record.Id] = 0;
             _jobs[record.Id] = record;
         }
@@ -125,6 +122,14 @@ public sealed class JobStore : BackgroundService
         _dirty.TryRemove(id, out _);
         try
         {
+            _persistence.Delete(id);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "Could not delete job {JobId} from the database", id);
+        }
+        try
+        {
             var folder = _paths.JobFolder(id);
             if (Directory.Exists(folder)) Directory.Delete(folder, recursive: true);
         }
@@ -147,7 +152,7 @@ public sealed class JobStore : BackgroundService
 
     private void MarkDirty(Guid id) => _dirty[id] = 0;
 
-    /// <summary>Writes every changed job to disk.</summary>
+    /// <summary>Writes every changed job to the database.</summary>
     public void Flush()
     {
         foreach (var id in _dirty.Keys.ToList())
@@ -156,11 +161,12 @@ public sealed class JobStore : BackgroundService
             if (!_jobs.TryGetValue(id, out var record)) continue;
             try
             {
-                lock (record) JsonFile.Write(_paths.JobFile(id), record);
+                lock (record) _persistence.Save(record);
             }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                _dirty[id] = 0; // try again on the next tick
+                // The database is busy or away for a moment: the change stays in memory and is written on the next tick.
+                _dirty[id] = 0;
                 _logger.LogWarning(ex, "Could not save job {JobId}", id);
             }
         }

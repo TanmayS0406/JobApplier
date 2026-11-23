@@ -44,7 +44,6 @@ public sealed class AppPaths
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "JobApplier-Accounts.docx");
 
     public string JobFolder(Guid id) => Path.Combine(JobsRoot, id.ToString("N"));
-    public string JobFile(Guid id) => Path.Combine(JobFolder(id), "job.json");
 
     /// <summary>Working directory of the Claude process. The agent's file access is confined to it.</summary>
     public string Workspace(Guid id) => Path.Combine(JobFolder(id), "workspace");

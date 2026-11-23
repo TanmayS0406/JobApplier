@@ -152,7 +152,7 @@ public class ResumeCoachServiceTests
     private static (ResumeCoachService Service, FakeRunner Runner, GapAnalysisService Analysis, JobStore Jobs, ProfileService Profile, TestEnv Env) Create(bool withJobs = true, bool withResume = true)
     {
         var env = new TestEnv();
-        var jobs = new JobStore(env.Paths, NullLogger<JobStore>.Instance);
+        var jobs = env.NewStore();
         var profile = new ProfileService(env.Paths);
         if (withResume) profile.Save(new UserProfile { ResumeText = InsightsData.Resume });
         if (withJobs)
@@ -282,7 +282,7 @@ public class InsightsControllerTests
     private static (InsightsController Controller, SettingsService Settings, TestEnv Env) Create(int defaultMin = 0)
     {
         var env = new TestEnv();
-        var jobs = new JobStore(env.Paths, NullLogger<JobStore>.Instance);
+        var jobs = env.NewStore();
         var profile = new ProfileService(env.Paths);
         profile.Save(new UserProfile { ResumeText = InsightsData.Resume });
         var settings = new SettingsService(env.Paths);

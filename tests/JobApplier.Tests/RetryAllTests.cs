@@ -13,10 +13,10 @@ public class LegacyLimitFailureTests
 {
     private static JobStore Reload(TestEnv env, params JobRecord[] jobs)
     {
-        var first = new JobStore(env.Paths, NullLogger<JobStore>.Instance);
+        var first = env.NewStore();
         foreach (var job in jobs) first.Add(job);
         first.Flush();
-        return new JobStore(env.Paths, NullLogger<JobStore>.Instance);   // loading is what upgrades old failures
+        return env.NewStore();   // loading is what upgrades old failures
     }
 
     private static JobRecord Failed(string detail, DateTime failedAt) => new() { Status = JobStatus.Failed, StatusDetail = detail, UpdatedUtc = failedAt };
@@ -45,7 +45,7 @@ public class LegacyLimitFailureTests
         var job = Failed("You've hit your session limit · resets 8pm (UTC)", DateTime.UtcNow.AddDays(-2));
         var store = Reload(env, job);
         var runner = new JobRunner(store, new HumanHelpBroker(store), new SettingsService(env.Paths),
-            new PipelineServices(null!, store, new ProfileService(env.Paths), null!, env.Paths), NullLogger<JobRunner>.Instance);
+            new PipelineServices(null!, store, new ProfileService(env.Paths), null!, env.Paths), new RecordingJobQueue(), NullLogger<JobRunner>.Instance);
 
         Assert.True(runner.ArmAutoRetry(job.Id));
         Assert.Equal(1, runner.RetryDueJobs(DateTime.UtcNow));
@@ -92,9 +92,9 @@ public class LegacyLimitFailureTests
         var job = Failed("You've hit your session limit · resets 8pm (UTC)", DateTime.UtcNow.AddDays(-1));
         Reload(env, job);   // the first load upgrades the job and marks it for saving
 
-        var second = new JobStore(env.Paths, NullLogger<JobStore>.Instance);
+        var second = env.NewStore();
         second.Flush();
-        var third = new JobStore(env.Paths, NullLogger<JobStore>.Instance);
+        var third = env.NewStore();
 
         Assert.True(third.Read(job.Id, r => r.LimitHit));
     }

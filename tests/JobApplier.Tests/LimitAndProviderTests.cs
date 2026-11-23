@@ -413,7 +413,7 @@ public class ProviderSettingsTests
     {
         using var env = new TestEnv();
         var settings = new SettingsService(env.Paths);
-        var store = new JobStore(env.Paths, NullLogger<JobStore>.Instance);
+        var store = env.NewStore();
         var profile = new ProfileService(env.Paths);
         var accounts = new AccountService(env.Paths, settings, NullLogger<AccountService>.Instance);
         var mcp = new JobMcpServer(store, new HumanHelpBroker(store), accounts, profile, settings);
@@ -431,7 +431,9 @@ public class ProviderSettingsTests
 /// <summary>A job runner and the services around it, with the pipeline's limit notifications recorded.</summary>
 internal sealed class Rig : IDisposable
 {
-    public TestEnv Env { get; } = new();
+    private readonly bool _ownsEnv;
+
+    public TestEnv Env { get; }
     public JobStore Store { get; }
     public SettingsService Settings { get; }
     public ProfileService Profile { get; }
@@ -439,18 +441,29 @@ internal sealed class Rig : IDisposable
     public HumanHelpBroker Broker { get; }
     public PipelineServices Pipeline { get; }
     public JobRunner Runner { get; }
+    public RecordingJobQueue Queue { get; } = new();
     public List<DateTime?> LimitNotices { get; } = new();
 
-    public Rig()
+    public Rig() : this(new TestEnv(), ownsEnv: true) { }
+
+    /// <summary>
+    /// The app started again over the same data folder and database: everything is new, so only what an earlier rig flushed is there.
+    /// The earlier rig still owns (and removes) the folder.
+    /// </summary>
+    public Rig(TestEnv sameData) : this(sameData, ownsEnv: false) { }
+
+    private Rig(TestEnv env, bool ownsEnv)
     {
+        Env = env;
+        _ownsEnv = ownsEnv;
         Settings = new SettingsService(Env.Paths);
         Settings.Save(new AppSettings { AccountsDocumentPath = Path.Combine(Env.Root, "a.docx") });
-        Store = new JobStore(Env.Paths, NullLogger<JobStore>.Instance);
+        Store = Env.NewStore();
         Profile = new ProfileService(Env.Paths);
         Accounts = new AccountService(Env.Paths, Settings, NullLogger<AccountService>.Instance);
         Broker = new HumanHelpBroker(Store);
         Pipeline = new PipelineServices(null!, Store, Profile, Accounts, Env.Paths, null, until => LimitNotices.Add(until));
-        Runner = new JobRunner(Store, Broker, Settings, Pipeline, NullLogger<JobRunner>.Instance);
+        Runner = new JobRunner(Store, Broker, Settings, Pipeline, Queue, NullLogger<JobRunner>.Instance);
     }
 
     /// <summary>A failed job that stopped on a usage limit.</summary>
@@ -470,7 +483,10 @@ internal sealed class Rig : IDisposable
         return job;
     }
 
-    public void Dispose() => Env.Dispose();
+    public void Dispose()
+    {
+        if (_ownsEnv) Env.Dispose();
+    }
 }
 
 public class UsageLimitRetryTests
@@ -640,7 +656,7 @@ public class UsageLimitRetryTests
         var job = rig.Limited(Now.AddHours(1), auto: true, retries: 1);
         rig.Store.Flush();
 
-        var reloaded = new JobStore(rig.Env.Paths, NullLogger<JobStore>.Instance);
+        var reloaded = rig.Env.NewStore();
 
         Assert.True(reloaded.Read(job.Id, r => r.WaitingForLimitReset));
         Assert.Equal(1, reloaded.Read(job.Id, r => r.LimitRetries));

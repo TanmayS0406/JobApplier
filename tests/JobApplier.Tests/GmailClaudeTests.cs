@@ -1229,7 +1229,7 @@ public class GmailControllerTests
         var store = new ReplyStore(env.Paths);
         var checker = new MailChecker(reader, accounts, store, NullLogger<MailChecker>.Instance);
 
-        var controller = new GmailController(reader, checker, store, accounts, new JobStore(env.Paths, NullLogger<JobStore>.Instance), settings, new StubLifetime(), NullLogger<GmailController>.Instance)
+        var controller = new GmailController(reader, checker, store, accounts, env.NewStore(), settings, new StubLifetime(), NullLogger<GmailController>.Instance)
         {
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() }
         };
@@ -1274,7 +1274,7 @@ public class GmailControllerTests
         var reader = new FakeReader { Gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously) };
         var store = new ReplyStore(env.Paths);
         var checker = new MailChecker(reader, accounts, store, NullLogger<MailChecker>.Instance);
-        var controller = new GmailController(reader, checker, store, accounts, new JobStore(env.Paths, NullLogger<JobStore>.Instance), settings, new StubLifetime(), NullLogger<GmailController>.Instance)
+        var controller = new GmailController(reader, checker, store, accounts, env.NewStore(), settings, new StubLifetime(), NullLogger<GmailController>.Instance)
         {
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() }
         };
@@ -1442,7 +1442,7 @@ public class DashboardReplyColumnTests
     public void The_results_table_knows_whether_tracking_is_on_and_which_reply_belongs_to_which_job()
     {
         using var env = new TestEnv();
-        var jobs = new JobStore(env.Paths, NullLogger<JobStore>.Instance);
+        var jobs = env.NewStore();
         var job = new JobRecord { Status = JobStatus.Applied };
         jobs.Add(job);
         var store = new ReplyStore(env.Paths);

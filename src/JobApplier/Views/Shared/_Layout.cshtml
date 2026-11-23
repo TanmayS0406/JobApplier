@@ -23,6 +23,7 @@
             <a class="@Active("Insights")" asp-controller="Insights" asp-action="Index">Insights</a>
             <a class="@Active("Profile")" asp-controller="Profile" asp-action="Index">Profile</a>
             <a class="@Active("Settings")" asp-controller="Settings" asp-action="Index">Settings</a>
+            <a href="/hangfire" target="_blank" rel="noopener" title="What is waiting, running, or scheduled for after a usage limit (Hangfire dashboard)">Queue</a>
         </nav>
         <span class="pills">
             <a class="pill pill-unknown @(useGemini ? "" : "pill-active")" asp-controller="Settings" asp-action="Index" data-provider-pill

@@ -16,7 +16,7 @@ public class JobStoreTests
     public void Log_masks_the_jobs_password()
     {
         using var env = new TestEnv();
-        var store = new JobStore(env.Paths, NullLogger<JobStore>.Instance);
+        var store = env.NewStore();
         var job = new JobRecord { Password = "Zq7!test-SECRET" };
         store.Add(job);
 
@@ -29,20 +29,20 @@ public class JobStoreTests
     }
 
     [Fact]
-    public void Jobs_survive_a_restart_and_unfinished_ones_become_retryable()
+    public void Jobs_survive_a_restart_and_unfinished_ones_are_left_for_the_runner_to_continue()
     {
         using var env = new TestEnv();
-        var first = new JobStore(env.Paths, NullLogger<JobStore>.Instance);
+        var first = env.NewStore();
         var running = new JobRecord { Status = JobStatus.Applying, Extracted = new ExtractedJob { Company = "Acme", Title = "Dev" } };
         var done = new JobRecord { Status = JobStatus.Applied };
         first.Add(running);
         first.Add(done);
         first.Flush();
 
-        var second = new JobStore(env.Paths, NullLogger<JobStore>.Instance);
+        var second = env.NewStore();
 
-        Assert.Equal(JobStatus.Failed, second.Read(running.Id, r => r.Status));
-        Assert.Contains("Retry", second.Read(running.Id, r => r.StatusDetail)!);
+        // Not failed any more: JobRunner.RecoverAfterRestart queues it again and it continues from the stage it had reached.
+        Assert.Equal(JobStatus.Applying, second.Read(running.Id, r => r.Status));
         Assert.Equal("Acme", second.Read(running.Id, r => r.Extracted!.Company));
         Assert.Equal(JobStatus.Applied, second.Read(done.Id, r => r.Status));
     }
@@ -51,7 +51,7 @@ public class JobStoreTests
     public void Log_is_capped()
     {
         using var env = new TestEnv();
-        var store = new JobStore(env.Paths, NullLogger<JobStore>.Instance);
+        var store = env.NewStore();
         var job = new JobRecord();
         store.Add(job);
         for (var i = 0; i < 800; i++) store.Log(job.Id, "info", "line " + i);
@@ -65,7 +65,7 @@ public class JobStoreTests
     public void Remove_deletes_the_job_folder()
     {
         using var env = new TestEnv();
-        var store = new JobStore(env.Paths, NullLogger<JobStore>.Instance);
+        var store = env.NewStore();
         var job = new JobRecord();
         Directory.CreateDirectory(env.Paths.JobFolder(job.Id));
         store.Add(job);
@@ -82,7 +82,7 @@ public class JobStoreClearTests
     public void RemoveWhere_deletes_only_the_accepted_jobs_and_their_folders()
     {
         using var env = new TestEnv();
-        var store = new JobStore(env.Paths, NullLogger<JobStore>.Instance);
+        var store = env.NewStore();
         var failedA = new JobRecord { Status = JobStatus.Failed };
         var failedB = new JobRecord { Status = JobStatus.Failed };
         var running = new JobRecord { Status = JobStatus.Applying };
@@ -91,7 +91,7 @@ public class JobStoreClearTests
         foreach (var job in new[] { failedA, failedB, running, applied, notFound })
         {
             Directory.CreateDirectory(env.Paths.JobFolder(job.Id));
-            File.WriteAllText(env.Paths.JobFile(job.Id), "{}");
+            File.WriteAllText(Path.Combine(env.Paths.JobFolder(job.Id), "screenshot.png"), "x");
             store.Add(job);
         }
 
@@ -113,7 +113,7 @@ public class JobStoreClearTests
     public void A_failed_job_that_is_still_active_can_be_left_out_by_the_rule()
     {
         using var env = new TestEnv();
-        var store = new JobStore(env.Paths, NullLogger<JobStore>.Instance);
+        var store = env.NewStore();
         var stopped = new JobRecord { Status = JobStatus.Failed };
         var stillWinding = new JobRecord { Status = JobStatus.Failed };
         store.Add(stopped);
@@ -129,7 +129,7 @@ public class JobStoreClearTests
     public void Nothing_to_remove_is_not_an_error()
     {
         using var env = new TestEnv();
-        var store = new JobStore(env.Paths, NullLogger<JobStore>.Instance);
+        var store = env.NewStore();
         store.Add(new JobRecord { Status = JobStatus.Applied });
 
         Assert.Equal(0, store.RemoveWhere(r => r.Status == JobStatus.Failed));
@@ -141,7 +141,7 @@ public class HumanHelpBrokerTests
     private static (HumanHelpBroker Broker, JobStore Store, Guid Id, TestEnv Env) Create()
     {
         var env = new TestEnv();
-        var store = new JobStore(env.Paths, NullLogger<JobStore>.Instance);
+        var store = env.NewStore();
         var job = new JobRecord();
         store.Add(job);
         return (new HumanHelpBroker(store), store, job.Id, env);
@@ -640,7 +640,7 @@ public class ExtractSplitTests
     private static (ExtractExecutor Stage, JobStore Store, List<Guid> Enqueued, TestEnv Env) Create()
     {
         var env = new TestEnv();
-        var store = new JobStore(env.Paths, NullLogger<JobStore>.Instance);
+        var store = env.NewStore();
         var enqueued = new List<Guid>();
         var services = new PipelineServices(null!, store, new ProfileService(env.Paths), null!, env.Paths, id => { enqueued.Add(id); return true; });
         return (new ExtractExecutor(services), store, enqueued, env);
@@ -762,7 +762,7 @@ public class ApplyStageDuplicateGuardTests
         File.WriteAllText(Path.Combine(env.Paths.ResumeFolder, "resume.txt"), "resume");
         profile.Save(new UserProfile { Email = "jane@example.com", ResumeFileName = "resume.txt" });
 
-        var store = new JobStore(env.Paths, NullLogger<JobStore>.Instance);
+        var store = env.NewStore();
         var accounts = new AccountService(env.Paths, settings, NullLogger<AccountService>.Instance);
         return (new ApplyExecutor(new PipelineServices(null!, store, profile, accounts, env.Paths)), store, accounts, env);
     }
@@ -918,7 +918,7 @@ public class JobMcpServerTests
         var env = new TestEnv();
         var settings = new SettingsService(env.Paths);
         settings.Save(new AppSettings { AccountsDocumentPath = Path.Combine(env.Root, "accounts.docx") });
-        var store = new JobStore(env.Paths, NullLogger<JobStore>.Instance);
+        var store = env.NewStore();
         job ??= new JobRecord { Password = "Gen!erated-pass1" };
         store.Add(job);
         var profile = new ProfileService(env.Paths);

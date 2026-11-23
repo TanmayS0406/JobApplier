@@ -173,7 +173,7 @@ public class JobListTests
 
     private static JobStore Store(TestEnv env, params JobRecord[] jobs)
     {
-        var store = new JobStore(env.Paths, NullLogger<JobStore>.Instance);
+        var store = env.NewStore();
         foreach (var job in jobs) store.Add(job);
         return store;
     }
@@ -326,7 +326,7 @@ public class ReplyListTests
 
         public Rig()
         {
-            Jobs = new JobStore(Env.Paths, NullLogger<JobStore>.Instance);
+            Jobs = Env.NewStore();
             Replies = new ReplyStore(Env.Paths);
             var settings = new SettingsService(Env.Paths);
             Accounts = new AccountService(Env.Paths, settings, NullLogger<AccountService>.Instance);
@@ -459,7 +459,7 @@ public class ListEndpointTests
     public void The_replies_endpoint_pages_sorts_and_filters_from_its_query_and_ignores_nonsense()
     {
         using var env = new TestEnv();
-        var jobs = new JobStore(env.Paths, NullLogger<JobStore>.Instance);
+        var jobs = env.NewStore();
         var replies = new ReplyStore(env.Paths);
         var settings = new SettingsService(env.Paths);
         var accounts = new AccountService(env.Paths, settings, NullLogger<AccountService>.Instance);

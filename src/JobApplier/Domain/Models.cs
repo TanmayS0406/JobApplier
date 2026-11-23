@@ -236,6 +236,12 @@ public sealed class JobRecord
     public string StatusDetail { get; set; } = "";
     public JobOptions Options { get; set; } = new();
 
+    /// <summary>
+    /// Id of the Hangfire background job that will run (or is running) this job; null when none is waiting. Kept so a queued job can be
+    /// taken out of the queue when it is cancelled, and so a restart can replace the entries left over from the previous run.
+    /// </summary>
+    public string? QueueId { get; set; }
+
     public ExtractedJob? Extracted { get; set; }
     public FoundPosting? Found { get; set; }
     public MatchResult? Match { get; set; }

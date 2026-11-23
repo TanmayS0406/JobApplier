@@ -113,8 +113,8 @@ internal abstract class StageExecutor : Executor<StageResult, StageResult>
     }
 
     /// <summary>
-    /// The AI ran out of tokens or quota. Nothing is wrong with the job itself, so it is marked as waiting for the limit to reset:
-    /// the dashboard offers "Retry when available" and the runner holds back the jobs that have not started yet.
+    /// The AI ran out of tokens or quota. Nothing is wrong with the job itself, so it is marked as waiting for the limit to reset: the runner
+    /// arms it to continue by itself once the limit is over, and holds back the jobs that have not started yet.
     /// </summary>
     internal void FailForLimit(Guid jobId, ClaudeAgentException ex, DateTime? nowUtc = null)
     {
@@ -125,7 +125,7 @@ internal abstract class StageExecutor : Executor<StageResult, StageResult>
 
         var detail = "The AI usage limit was reached, so this job stopped. " +
                      (known ? "It should reset " : "No reset time was given; it will be tried again ") + UsageLimit.Describe(retryAfter, now) + ". " +
-                     "Nothing is lost: press Retry once it has reset, or Retry when available to let JobApplier do it." +
+                     "Nothing is lost: JobApplier keeps watching and continues this job from where it stopped once the limit is over (or press Retry to try now)." +
                      (Id == "apply" ? " The application may already have been submitted before this happened - check the employer's site before retrying." : "");
 
         Store.Update(jobId, r => { r.LimitHit = true; r.RetryAfterUtc = retryAfter; r.LimitResetKnown = known; });

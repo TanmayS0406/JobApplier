@@ -1,7 +1,11 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Hangfire;
+using Hangfire.Dashboard;
+using Hangfire.SqlServer;
 using JobApplier.Agents;
 using JobApplier.Claude;
+using JobApplier.Persistence;
 using JobApplier.Infrastructure;
 using JobApplier.Insights;
 using JobApplier.Mail;
@@ -38,6 +42,14 @@ builder.Services.AddSingleton<ReplyStore>();
 builder.Services.AddSingleton<MailChecker>();
 builder.Services.AddHostedService<MailWatcher>();
 
+// The jobs live in SQL Server (EF Core; the schema is migrated every time the app starts, see below) and the queue that runs them is
+// Hangfire, in the same database, so neither is lost when the app is closed.
+var connectionString = DatabaseStartup.ConnectionString(builder.Configuration);
+builder.Services.AddDbContextFactory<JobApplierDbContext>(options => JobApplierDbOptions.Configure(options, connectionString));
+builder.Services.AddSingleton<IJobPersistence, EfJobPersistence>();
+
+// Registered before the Hangfire server below: hosted services stop in reverse order, so the last writes of the jobs that are
+// being wound down are flushed to the database after the server has stopped.
 builder.Services.AddSingleton<JobStore>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<JobStore>());
 
@@ -60,7 +72,29 @@ builder.Services.AddSingleton(sp => new PipelineServices(
     jobId => sp.GetRequiredService<JobRunner>().Enqueue(jobId),
     until => sp.GetRequiredService<JobRunner>().NoteUsageLimit(until)));
 builder.Services.AddSingleton<JobRunner>();
-builder.Services.AddHostedService(sp => sp.GetRequiredService<JobRunner>());
+
+builder.Services.AddHangfire(config => config
+    .SetDataCompatibilityLevel(CompatibilityLevel.Version_180)
+    .UseSimpleAssemblyNameTypeSerializer()
+    .UseRecommendedSerializerSettings()
+    .UseSqlServerStorage(connectionString, new SqlServerStorageOptions
+    {
+        CommandBatchMaxTimeout = TimeSpan.FromMinutes(5),
+        SlidingInvisibilityTimeout = TimeSpan.FromMinutes(5),   // a run killed with the app is picked up again after this at the latest (a restart does it at once)
+        QueuePollInterval = TimeSpan.Zero,                      // long polling: a queued job starts at once
+        UseRecommendedIsolationLevel = true,
+        DisableGlobalLocks = true
+    }));
+builder.Services.AddSingleton<IJobQueue, HangfireJobQueue>();
+builder.Services.AddHostedService<JobRecoveryService>();
+builder.Services.AddHangfireServer(options =>
+{
+    options.Queues = JobQueues.All;
+    // The most "jobs at the same time" Settings allows (8), plus room for the small recurring check. How many of them really run
+    // at once is the user's setting, applied by the runner, so changing it needs no restart.
+    options.WorkerCount = 10;
+    options.ShutdownTimeout = TimeSpan.FromSeconds(20);
+});
 
 builder.Services.AddControllersWithViews(options => options.Filters.Add(new AutoValidateAntiforgeryTokenAttribute()));
 
@@ -69,6 +103,11 @@ builder.Services.Configure<FormOptions>(o => o.MultipartBodyLengthLimit = 700L *
 builder.WebHost.ConfigureKestrel(k => k.Limits.MaxRequestBodySize = 700L * 1024 * 1024);
 
 var app = builder.Build();
+
+// The database comes first: bring its schema up to date (creating it if needed), then move in the jobs of the earlier, file-based
+// versions. Nothing reads a job before this, and Hangfire opens its own tables in the same database only once it is there.
+DatabaseStartup.Migrate(app.Services);
+LegacyJobImporter.Import(paths, app.Services.GetRequiredService<IJobPersistence>(), app.Logger);
 
 // The Claude process needs to know where this app's MCP endpoint is once Kestrel has picked its address.
 app.Lifetime.ApplicationStarted.Register(() =>
@@ -95,12 +134,24 @@ app.Use(async (context, next) =>
     headers["X-Content-Type-Options"] = "nosniff";
     headers["X-Frame-Options"] = "DENY";
     headers["Referrer-Policy"] = "no-referrer";
-    headers["Content-Security-Policy"] =
-        "default-src 'self'; img-src 'self' data: blob:; style-src 'self'; script-src 'self'; frame-ancestors 'none'; form-action 'self'";
+    // Hangfire's dashboard has its own inline script and styles, which this policy would block.
+    if (!context.Request.Path.StartsWithSegments("/hangfire"))
+    {
+        headers["Content-Security-Policy"] =
+            "default-src 'self'; img-src 'self' data: blob:; style-src 'self'; script-src 'self'; frame-ancestors 'none'; form-action 'self'";
+    }
     await next();
 });
 
 app.UseStaticFiles();
+
+// The queue's own dashboard: what is waiting, running, scheduled for after a usage limit, and the recurring check. This machine only.
+app.UseHangfireDashboard("/hangfire", new DashboardOptions
+{
+    DashboardTitle = "JobApplier queue",
+    Authorization = new IDashboardAuthorizationFilter[] { new LocalRequestsOnlyAuthorizationFilter() }
+});
+
 app.UseRouting();
 
 // The MCP endpoint the Claude processes call. Not part of the UI: guarded by a per-run bearer token.
