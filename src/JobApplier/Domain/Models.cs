@@ -46,23 +46,30 @@ public sealed class JobOptions
 
     /// <summary>Jobs scoring below this percentage are not applied to. 0 disables the gate.</summary>
     public int MinMatchPercent { get; set; }
+
+    /// <summary>
+    /// Apply only when the posting says the employer sponsors visas or helps with relocation. A posting that says nothing about either,
+    /// or says there is none, is skipped (and can still be applied to with "Apply anyway").
+    /// </summary>
+    public bool RequireVisaOrRelocation { get; set; }
 }
 
 /// <summary>
-/// What the user chose in the "Retry" dialog: the same two choices as on the upload form. They replace the job's own settings before it is
+/// What the user chose in the "Retry" dialog: the same choices as on the upload form. They replace the job's own settings before it is
 /// queued again. The minimum match is checked against the match score the job already has, so a score that was kept is judged by the new
 /// minimum, and auto-submit is read when the apply stage starts.
 /// </summary>
-public sealed record RetryOptions(bool AutoSubmit, int MinMatchPercent)
+public sealed record RetryOptions(bool AutoSubmit, int MinMatchPercent, bool RequireVisaOrRelocation = false)
 {
     /// <summary>The choices as the form posted them. Null when the form did not carry any (an older button), which leaves every job as it was.</summary>
-    public static RetryOptions? From(bool chosen, bool autoSubmit, int? minMatch) =>
-        chosen ? new RetryOptions(autoSubmit, Math.Clamp(minMatch ?? 0, 0, 100)) : null;
+    public static RetryOptions? From(bool chosen, bool autoSubmit, int? minMatch, bool requireVisaOrRelocation = false) =>
+        chosen ? new RetryOptions(autoSubmit, Math.Clamp(minMatch ?? 0, 0, 100), requireVisaOrRelocation) : null;
 
     /// <summary>"submits automatically, skips below 70%" - for the job log and the message after the click.</summary>
     public string Describe() =>
         (AutoSubmit ? "submits automatically" : "waits for your approval before submitting")
-        + (MinMatchPercent > 0 ? $", skips below {MinMatchPercent}%" : ", no minimum match");
+        + (MinMatchPercent > 0 ? $", skips below {MinMatchPercent}%" : ", no minimum match")
+        + (RequireVisaOrRelocation ? ", only if it offers visa sponsorship or relocation" : "");
 }
 
 // ---- Structured results returned by the agents. [Description] text becomes part of the JSON schema. ----
@@ -155,6 +162,34 @@ public sealed class MatchResult
     [Description("Skills / requirements from the job that the resume does not show.")]
     public List<string> MissingSkills { get; set; } = new();
 
+    [Description("From the JOB DESCRIPTION only: Offered if it clearly says the employer sponsors work visas; NotOffered if it says there is no sponsorship or that applicants must already be allowed to work without it; NotMentioned if it says nothing about visas or sponsorship.")]
+    public SupportLevel VisaSponsorship { get; set; } = SupportLevel.NotMentioned;
+
+    [Description("From the JOB DESCRIPTION only: Offered if it says the employer helps with relocation (a relocation package, allowance, assistance or support); NotOffered if it says no relocation help is given; NotMentioned otherwise. A requirement to live in or move to a place ('must be willing to relocate', 'on-site in Berlin') is NOT an offer of relocation help.")]
+    public SupportLevel Relocation { get; set; } = SupportLevel.NotMentioned;
+
+    [Description("The one or two sentences of the job description that show the two answers above, copied as written. Empty string when it says nothing about visas, sponsorship or relocation.")]
+    public string SupportEvidence { get; set; } = "";
+
+    /// <summary>
+    /// True once the matcher was asked about visa sponsorship and relocation. A score saved by an earlier version carries no answer,
+    /// which must not be mistaken for "the posting says nothing". Set by the app, not by the model (so it is not in the schema).
+    /// </summary>
+    [JsonIgnore]
+    public bool SupportAssessed { get; set; }
+
+    /// <summary>The posting says the employer sponsors a visa or helps with relocation: what the "only if it offers ..." option needs.</summary>
+    [JsonIgnore]
+    public bool OffersVisaOrRelocation => VisaSponsorship == SupportLevel.Offered || Relocation == SupportLevel.Offered;
+
+    /// <summary>Why a job was skipped for not offering either, in the words of the posting's own silence or refusal.</summary>
+    public string DescribeMissingSupport()
+    {
+        var visa = VisaSponsorship == SupportLevel.NotOffered ? "says it does not sponsor visas" : "does not mention visa sponsorship";
+        var move = Relocation == SupportLevel.NotOffered ? "says it gives no relocation help" : "does not mention relocation help";
+        return $"The posting {visa} and {move}, and you asked to apply only where the employer offers visa sponsorship or relocation.";
+    }
+
     /// <summary>Weighted overall percentage, computed here so the score is stable and explainable.</summary>
     [JsonIgnore]
     public int Percent => ComputePercent(SkillsScore, ExperienceScore, DomainScore, SeniorityScore, LogisticsScore);
@@ -165,6 +200,15 @@ public sealed class MatchResult
         var weighted = Clamp(skills) * 40 + Clamp(experience) * 25 + Clamp(domain) * 15 + Clamp(seniority) * 10 + Clamp(logistics) * 10;
         return (int)Math.Round(weighted / 100.0, MidpointRounding.AwayFromZero);
     }
+}
+
+/// <summary>What a job posting says about an employer benefit, such as visa sponsorship or relocation help.</summary>
+public enum SupportLevel
+{
+    /// <summary>The posting says nothing about it (also the value of a score saved before this was asked).</summary>
+    NotMentioned,
+    Offered,
+    NotOffered
 }
 
 public enum ApplyResultKind
@@ -390,24 +434,25 @@ public sealed class ApplicationRecord
 public static class AiProvider
 {
     public const string Claude = "claude";
-    public const string Gemini = "gemini";
+    public const string Copilot = "copilot";
 
+    /// <summary>Anything that is not Copilot means Claude, so a setting saved by an earlier version (which could also say "gemini") still starts the app.</summary>
     public static string Normalize(string? provider) =>
-        string.Equals(provider?.Trim(), Gemini, StringComparison.OrdinalIgnoreCase) ? Gemini : Claude;
+        string.Equals(provider?.Trim(), Copilot, StringComparison.OrdinalIgnoreCase) ? Copilot : Claude;
 
-    public static string Label(string? provider) => Normalize(provider) == Gemini ? "Gemini" : "Claude";
+    public static string Label(string? provider) => Normalize(provider) == Copilot ? "GitHub Copilot" : "Claude";
 }
 
 public sealed class AppSettings
 {
-    /// <summary>Which AI runs the jobs: <c>claude</c> (Claude Code CLI) or <c>gemini</c> (Gemini CLI).</summary>
+    /// <summary>Which AI runs the jobs: <c>claude</c> (Claude Code CLI) or <c>copilot</c> (GitHub Copilot CLI).</summary>
     public string Provider { get; set; } = AiProvider.Claude;
 
-    /// <summary>Full path to gemini (or gemini.cmd). Empty = find it automatically.</summary>
-    public string GeminiPath { get; set; } = "";
+    /// <summary>Full path to copilot (copilot.exe or copilot.cmd). Empty = find it automatically.</summary>
+    public string CopilotPath { get; set; } = "";
 
-    /// <summary>Gemini model id, for example <c>gemini-2.5-pro</c>. Empty = the Gemini CLI's default.</summary>
-    public string GeminiModel { get; set; } = "";
+    /// <summary>Model for the Copilot CLI's <c>--model</c>, for example <c>auto</c>. Empty = the Copilot CLI's default.</summary>
+    public string CopilotModel { get; set; } = "";
 
     /// <summary>Full path to claude.exe. Empty = find it automatically.</summary>
     public string ClaudePath { get; set; } = "";
@@ -429,6 +474,9 @@ public sealed class AppSettings
 
     public bool DefaultAutoSubmit { get; set; }
     public int DefaultMinMatchPercent { get; set; }
+
+    /// <summary>Pre-ticks "only apply if the job offers visa sponsorship or relocation" on the dashboard and in the retry dialog.</summary>
+    public bool DefaultRequireVisaOrRelocation { get; set; }
 
     /// <summary>Where the accounts document is written. Empty = JobApplier-Accounts.docx on the Desktop.</summary>
     public string AccountsDocumentPath { get; set; } = "";

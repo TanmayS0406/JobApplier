@@ -190,12 +190,25 @@ namespace JobApplier.Persistence.Migrations
                             b1.PrimitiveCollection<string>("MissingSkills")
                                 .IsRequired();
 
+                            b1.Property<string>("Relocation")
+                                .IsRequired()
+                                .HasMaxLength(20);
+
                             b1.Property<int>("SeniorityScore");
 
                             b1.Property<int>("SkillsScore");
 
                             b1.Property<string>("Summary")
                                 .IsRequired();
+
+                            b1.Property<bool>("SupportAssessed");
+
+                            b1.Property<string>("SupportEvidence")
+                                .IsRequired();
+
+                            b1.Property<string>("VisaSponsorship")
+                                .IsRequired()
+                                .HasMaxLength(20);
 
                             b1
                                 .ToJson("Match")
@@ -213,6 +226,10 @@ namespace JobApplier.Persistence.Migrations
                             b1.Property<int>("MinMatchPercent")
                                 .HasColumnType("int")
                                 .HasColumnName("MinMatchPercent");
+
+                            b1.Property<bool>("RequireVisaOrRelocation")
+                                .HasColumnType("bit")
+                                .HasColumnName("RequireVisaOrRelocation");
                         });
 
                     b.ComplexProperty(typeof(Dictionary<string, object>), "PendingHelp", "JobApplier.Domain.JobRecord.PendingHelp#HelpRequest", b1 =>

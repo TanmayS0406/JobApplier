@@ -139,8 +139,14 @@ public sealed class JobRunner
             {
                 r.Options.AutoSubmit = options.AutoSubmit;
                 r.Options.MinMatchPercent = options.MinMatchPercent;
+                r.Options.RequireVisaOrRelocation = options.RequireVisaOrRelocation;
             }
-            if (applyAnyway) r.Options.MinMatchPercent = 0;   // "apply anyway" is explicit and wins over a minimum
+            if (applyAnyway)
+            {
+                // "apply anyway" is explicit and wins over a minimum and over the visa / relocation requirement
+                r.Options.MinMatchPercent = 0;
+                r.Options.RequireVisaOrRelocation = false;
+            }
 
             r.LimitHit = false;
             r.RetryAfterUtc = null;
@@ -151,7 +157,7 @@ public sealed class JobRunner
             }
         });
         _store.Log(jobId, "info", automatic ? "Retrying automatically: the usage limit should have reset."
-            : applyAnyway ? "Retrying, ignoring the minimum match."
+            : applyAnyway ? "Retrying, ignoring the minimum match and the visa / relocation requirement."
             : options != null ? "Retrying: " + options.Describe() + "." : "Retrying.");
         return Enqueue(jobId);
     }
@@ -256,6 +262,7 @@ public sealed class JobRunner
             {
                 r.Options.AutoSubmit = options.AutoSubmit;
                 r.Options.MinMatchPercent = options.MinMatchPercent;
+                r.Options.RequireVisaOrRelocation = options.RequireVisaOrRelocation;
             }
         });
         _store.Log(jobId, "info", options != null

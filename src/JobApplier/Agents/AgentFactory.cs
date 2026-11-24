@@ -32,7 +32,7 @@ public sealed class McpEndpointInfo
 }
 
 /// <summary>
-/// Builds the agent for a job - Claude Code or Gemini CLI, whichever the settings select - with the right workspace, tools and
+/// Builds the agent for a job - Claude Code or the GitHub Copilot CLI, whichever the settings select - with the right workspace, tools and
 /// live logging. Both take the same <see cref="ClaudeAgentSpec"/> and produce the same events.
 /// </summary>
 public sealed class AgentFactory
@@ -127,10 +127,10 @@ public sealed class AgentFactory
 
     /// <summary>The CLI path, model and effort of the selected provider. The spec fields keep their Claude-era names but hold the selected provider's values.</summary>
     private static (string Path, string Model, string Effort) Provider(AppSettings s) =>
-        AiProvider.Normalize(s.Provider) == AiProvider.Gemini ? (s.GeminiPath, s.GeminiModel, "") : (s.ClaudePath, s.Model, s.Effort);
+        AiProvider.Normalize(s.Provider) == AiProvider.Copilot ? (s.CopilotPath, s.CopilotModel, "") : (s.ClaudePath, s.Model, s.Effort);
 
     private static CliAgent Create(ClaudeAgentSpec spec, AppSettings s) =>
-        AiProvider.Normalize(s.Provider) == AiProvider.Gemini ? new GeminiCliAgent(spec) : new ClaudeCodeAgent(spec);
+        AiProvider.Normalize(s.Provider) == AiProvider.Copilot ? new CopilotCliAgent(spec) : new ClaudeCodeAgent(spec);
 
     private static JsonObject PlaywrightServer(AppSettings settings, string? secretsFile)
     {
@@ -166,6 +166,10 @@ public sealed class AgentFactory
             case InitEvent init:
                 foreach (var (name, status) in init.McpServers.Where(s => s.Status != "connected"))
                     _store.Log(jobId, "warn", $"Tool server '{name}' is {status}.");
+                break;
+
+            case NoticeEvent notice:
+                _store.Log(jobId, "warn", notice.Text.Length > 300 ? notice.Text[..300] + "..." : notice.Text);
                 break;
 
             case TextEvent text:

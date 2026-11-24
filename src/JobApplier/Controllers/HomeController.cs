@@ -42,6 +42,7 @@ public class HomeController : Controller
             ProfileEmail = profile.Email,
             DefaultAutoSubmit = settings.DefaultAutoSubmit,
             DefaultMinMatch = settings.DefaultMinMatchPercent,
+            DefaultRequireVisaOrRelocation = settings.DefaultRequireVisaOrRelocation,
             MaxParallel = settings.MaxParallelJobs,
             AccountsDocumentPath = _settings.AccountsDocumentPath
         });

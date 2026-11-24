@@ -24,14 +24,16 @@ public class EfJobPersistenceTests
             OriginalFileName = "Zürich – Entwickler (1).png",
             Status = JobStatus.Applying,
             StatusDetail = "Filling in the application",
-            Options = new JobOptions { AutoSubmit = true, MinMatchPercent = 70 },
+            Options = new JobOptions { AutoSubmit = true, MinMatchPercent = 70, RequireVisaOrRelocation = true },
             QueueId = "17",
             Extracted = new ExtractedJob { Company = "Acme", Title = "Dev", Skills = { "C#", "SQL" }, Description = "Build things", WorkMode = "Remote" },
             Found = new FoundPosting { Found = true, Url = "https://acme.example/jobs/1", Portal = "Greenhouse", Confidence = "high" },
             Match = new MatchResult
             {
                 SkillsScore = 80, ExperienceScore = 70, DomainScore = 60, SeniorityScore = 90, LogisticsScore = 100,
-                Summary = "Good fit", MatchedSkills = { "C#" }, MissingSkills = { "Go" }
+                Summary = "Good fit", MatchedSkills = { "C#" }, MissingSkills = { "Go" },
+                VisaSponsorship = SupportLevel.Offered, Relocation = SupportLevel.NotOffered,
+                SupportEvidence = "We sponsor visas; no relocation help.", SupportAssessed = true
             },
             Apply = new ApplyOutcome { Result = ApplyResultKind.AlreadyApplied, Summary = "Seen before", Confirmation = "ref-9" },
             PendingHelp = new HelpRequest { Id = "ab12cd34", Kind = HelpKind.Captcha, Message = "Solve it", CreatedUtc = new DateTime(2026, 11, 1, 8, 59, 0, DateTimeKind.Utc) },
@@ -65,6 +67,7 @@ public class EfJobPersistenceTests
         Assert.Equal("Filling in the application", job.StatusDetail);
         Assert.True(job.Options.AutoSubmit);
         Assert.Equal(70, job.Options.MinMatchPercent);
+        Assert.True(job.Options.RequireVisaOrRelocation);
         Assert.Equal("17", job.QueueId);
 
         Assert.Equal("Acme", job.Extracted!.Company);
@@ -73,6 +76,10 @@ public class EfJobPersistenceTests
         Assert.True(job.Found.Found);
         Assert.Equal(original.Match!.Percent, job.Match!.Percent);
         Assert.Equal(new[] { "Go" }, job.Match.MissingSkills);
+        Assert.Equal(SupportLevel.Offered, job.Match.VisaSponsorship);
+        Assert.Equal(SupportLevel.NotOffered, job.Match.Relocation);
+        Assert.Equal("We sponsor visas; no relocation help.", job.Match.SupportEvidence);
+        Assert.True(job.Match.SupportAssessed);
         Assert.Equal(ApplyResultKind.AlreadyApplied, job.Apply!.Result);
         Assert.Equal("ref-9", job.Apply.Confirmation);
         Assert.Equal(HelpKind.Captcha, job.PendingHelp!.Kind);

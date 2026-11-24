@@ -131,6 +131,7 @@ public sealed class DashboardViewModel
     public string ProfileEmail { get; init; } = "";
     public bool DefaultAutoSubmit { get; init; }
     public int DefaultMinMatch { get; init; }
+    public bool DefaultRequireVisaOrRelocation { get; init; }
     public int MaxParallel { get; init; }
     public string AccountsDocumentPath { get; init; } = "";
 }
@@ -168,4 +169,4 @@ public sealed class SettingsViewModel
 public sealed record SystemCheck(string Name, bool Ok, string Detail);
 
 /// <summary>The starting values of the Retry dialog when the button that opens it does not carry its own (the dashboard buttons use the defaults of the upload form).</summary>
-public sealed record RetryDialogModel(bool DefaultAutoSubmit, int DefaultMinMatch);
+public sealed record RetryDialogModel(bool DefaultAutoSubmit, int DefaultMinMatch, bool DefaultRequireVisaOrRelocation = false);

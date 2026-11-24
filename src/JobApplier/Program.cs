@@ -32,8 +32,7 @@ builder.Services.AddSingleton<ProfileService>();
 builder.Services.AddSingleton<AccountService>();
 builder.Services.AddSingleton<HumanHelpBroker>();
 builder.Services.AddSingleton<ClaudeAccountService>();
-builder.Services.AddSingleton<GeminiAccountService>();
-builder.Services.AddHttpClient<GeminiKeyChecker>(client => client.Timeout = TimeSpan.FromSeconds(10));
+builder.Services.AddSingleton<CopilotAccountService>();
 
 // Gmail replies: Claude reads the mailbox through the Gmail connector of the user's own Claude account (read-only tools only),
 // once the user has turned tracking on.

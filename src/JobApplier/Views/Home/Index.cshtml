@@ -14,7 +14,7 @@
 <section class="card">
     <h2>Add job screenshots</h2>
     <p class="muted">
-        Drop one or more screenshots of any job posting (LinkedIn, Indeed, a careers page, a message...), of a single job or of a list of jobs. The AI agent (Claude or Gemini, chosen in Settings) reads each screenshot and every job in it
+        Drop one or more screenshots of any job posting (LinkedIn, Indeed, a careers page, a message...), of a single job or of a list of jobs. The AI agent (Claude or GitHub Copilot, chosen in Settings) reads each screenshot and every job in it
         becomes its own job: it finds the real posting on the company's site, scores it against your resume, and fills in the
         application in its own browser window. Up to <strong>@Model.MaxParallel</strong> jobs run at the same time; the rest wait
         for a free slot (change the limit in Settings).
@@ -42,6 +42,13 @@
                 %
                 <small>0 = apply to everything.</small>
             </label>
+            <label class="check">
+                <input type="checkbox" name="requireVisaOrRelocation" value="true" @(Model.DefaultRequireVisaOrRelocation ? "checked" : null) />
+                <span>
+                    <strong>Only apply if the job offers visa sponsorship or relocation</strong>
+                    <small>The posting must say so. A job that says nothing about it, or says it has none, is skipped (you can still press <em>Apply anyway</em> on it).</small>
+                </span>
+            </label>
         </div>
 
         <div class="actions">
@@ -63,4 +70,4 @@
 </div>
 
 @* Outside #live on purpose: that area is replaced every 2.5 seconds, which would close the dialog while someone is choosing. *@
-<partial name="_RetryDialog" model="new RetryDialogModel(Model.DefaultAutoSubmit, Model.DefaultMinMatch)" />
+<partial name="_RetryDialog" model="new RetryDialogModel(Model.DefaultAutoSubmit, Model.DefaultMinMatch, Model.DefaultRequireVisaOrRelocation)" />

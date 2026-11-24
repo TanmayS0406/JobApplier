@@ -117,7 +117,8 @@ public class AgentErrorTests
 
     [Theory]
     [InlineData("Not logged in. Please run /login", "Open Settings and press 'Sign in with Claude'.")]
-    [InlineData("Please set an auth method in settings or set GEMINI_API_KEY", "Open Settings and press 'Sign in with Google'.")]
+    [InlineData("Error: No authentication information found", "Open Settings and press 'Sign in with GitHub'.")]
+    [InlineData("GitHub credential authority error: GitHub CLI could not provide a token", "Open Settings and press 'Sign in with GitHub'.")]
     public void A_sign_in_problem_gets_the_providers_hint(string error, string hint)
     {
         var ex = AgentErrors.Describe(error, hint);
@@ -138,77 +139,8 @@ public class AgentErrorTests
     }
 }
 
-public class GeminiStreamTests
+public class JsonExtractTests
 {
-    private static List<ClaudeEvent> Run(params string[] lines)
-    {
-        var parser = new GeminiStreamParser();
-        return lines.SelectMany(parser.Parse).ToList();
-    }
-
-    [Fact]
-    public void A_run_becomes_the_same_events_the_Claude_side_produces()
-    {
-        var events = Run(
-            """{"type":"init","session_id":"abc123","model":"gemini-2.5-pro"}""",
-            """{"type":"message","role":"user","content":"do it"}""",
-            """{"type":"message","role":"assistant","content":"Opening the ","delta":true}""",
-            """{"type":"message","role":"assistant","content":"page.","delta":true}""",
-            """{"type":"tool_use","tool_name":"mcp_playwright_browser_click","tool_id":"t1","parameters":{"element":"Apply"}}""",
-            """{"type":"tool_result","tool_id":"t1","status":"success","output":"ok"}""",
-            "{\"type\":\"message\",\"role\":\"assistant\",\"content\":\"```json\\n{\\\"Found\\\":true,\\\"Url\\\":\\\"https://a.example/1\\\"}\\n```\"}",
-            """{"type":"result","status":"success","stats":{"input_tokens":120,"output_tokens":30}}""");
-
-        Assert.Equal("abc123", Assert.IsType<InitEvent>(events[0]).SessionId);
-        Assert.Equal("Opening the page.", Assert.IsType<TextEvent>(events[1]).Text);   // the chunks are one block
-        Assert.Equal("mcp__playwright__browser_click", Assert.IsType<ToolUseEvent>(events[2]).Name);
-        var result = Assert.IsType<ResultEvent>(events[3]);
-        Assert.Equal(4, events.Count);                                                  // the final JSON is the answer, not a log line
-        Assert.False(result.IsError);
-        Assert.Equal("""{"Found":true,"Url":"https://a.example/1"}""", result.StructuredJson);
-        Assert.Equal(("abc123", 120L, 30L), (result.SessionId, result.InputTokens, result.OutputTokens));
-    }
-
-    [Fact]
-    public void A_failed_run_carries_the_error_the_CLI_gave()
-    {
-        var events = Run(
-            """{"type":"error","severity":"error","message":"429 RESOURCE_EXHAUSTED"}""",
-            """{"type":"result","status":"error","error":{"type":"Error","message":"You exceeded your current quota"}}""");
-
-        var result = Assert.IsType<ResultEvent>(Assert.Single(events));
-        Assert.True(result.IsError);
-        Assert.Equal("You exceeded your current quota", result.Text);
-        Assert.Null(result.StructuredJson);
-    }
-
-    [Fact]
-    public void An_error_event_is_remembered_for_a_run_that_never_reaches_a_result()
-    {
-        var parser = new GeminiStreamParser();
-        parser.Parse("""{"type":"error","severity":"error","message":"Please set an auth method"}""");
-
-        Assert.Equal("Please set an auth method", parser.LastError);
-    }
-
-    [Fact]
-    public void A_plain_answer_without_JSON_is_logged_and_has_no_structured_result()
-    {
-        var events = Run(
-            """{"type":"message","role":"assistant","content":"All done."}""",
-            """{"type":"result","status":"success"}""");
-
-        Assert.Equal("All done.", Assert.IsType<TextEvent>(events[0]).Text);
-        Assert.Null(Assert.IsType<ResultEvent>(events[1]).StructuredJson);
-    }
-
-    [Theory]
-    [InlineData("")]
-    [InlineData("not json at all")]
-    [InlineData("[1,2,3]")]
-    [InlineData("""{"type":"something_new"}""")]
-    public void Lines_that_are_not_events_are_ignored(string line) => Assert.Empty(Run(line));
-
     [Theory]
     [InlineData("""Here you go: {"a":1} thanks""", """{"a":1}""")]
     [InlineData("```json\n{\"a\":{\"b\":[1,2]}}\n```", """{"a":{"b":[1,2]}}""")]
@@ -222,190 +154,45 @@ public class GeminiStreamTests
     [InlineData("no object here")]
     [InlineData("{ unterminated")]
     public void No_object_gives_null(string? text) => Assert.Null(JsonExtract.FirstObject(text));
-
-    [Theory]
-    [InlineData("mcp_playwright_browser_click", "mcp__playwright__browser_click")]
-    [InlineData("playwright__browser_file_upload", "mcp__playwright__browser_file_upload")]
-    [InlineData("mcp__playwright__browser_type", "mcp__playwright__browser_type")]
-    [InlineData("mcp_jobapplier_wait_for_user", "mcp__jobapplier__wait_for_user")]
-    [InlineData("jobapplier__record_account", "mcp__jobapplier__record_account")]
-    [InlineData("report_progress", "mcp__jobapplier__report_progress")]
-    [InlineData("read_file", "Read")]
-    [InlineData("run_shell_command", "run_shell_command")]
-    public void Tool_names_are_mapped_to_the_spelling_the_rest_of_the_app_knows(string gemini, string expected) =>
-        Assert.Equal(expected, GeminiToolNames.Normalize(gemini, null).Name);
-
-    [Fact]
-    public void A_password_typed_through_Gemini_is_still_detected()
-    {
-        var parser = new GeminiStreamParser();
-        var evt = Assert.IsType<ToolUseEvent>(parser.Parse(
-            """{"type":"tool_use","tool_name":"mcp_playwright_browser_type","tool_id":"t","parameters":{"element":"Password","text":"JOB_PASSWORD"}}""").Single());
-
-        Assert.True(ApplyExecutor.TypesPassword(evt));
-    }
-
-    [Fact]
-    public void The_file_read_shows_only_the_file_name_in_the_log()
-    {
-        var parser = new GeminiStreamParser();
-        var evt = Assert.IsType<ToolUseEvent>(parser.Parse(
-            """{"type":"tool_use","tool_name":"read_file","tool_id":"t","parameters":{"absolute_path":"C:\\jobs\\ab\\workspace\\screenshot.png"}}""").Single());
-
-        Assert.Equal("Read: screenshot.png", ToolActivity.Describe(evt.Name, evt.Input));
-    }
-}
-
-public class GeminiSettingsTests
-{
-    private static ClaudeAgentSpec Spec(params (string Name, JsonObject Definition)[] servers) => new()
-    {
-        Name = "applicant",
-        Instructions = "x",
-        WorkingDirectory = "w",
-        PrivateFolder = "p",
-        McpServers = servers.ToDictionary(s => s.Name, s => s.Definition)
-    };
-
-    [Fact]
-    public void The_apps_http_server_and_Playwright_are_converted_and_trusted()
-    {
-        var spec = Spec(
-            ("jobapplier", JsonNode.Parse("""{"type":"http","url":"http://127.0.0.1:5189/mcp/ab","headers":{"Authorization":"Bearer t0ken"}}""")!.AsObject()),
-            ("playwright", JsonNode.Parse("""{"command":"cmd","args":["/c","npx","-y","@playwright/mcp@0.0.85"]}""")!.AsObject()));
-
-        var settings = GeminiSettings.Build(spec);
-
-        var app = settings["mcpServers"]!["jobapplier"]!;
-        Assert.Equal("http://127.0.0.1:5189/mcp/ab", (string?)app["httpUrl"]);
-        Assert.Equal("Bearer t0ken", (string?)app["headers"]!["Authorization"]);
-        Assert.True((bool)app["trust"]!);
-        Assert.Null(app["url"]);
-
-        var browser = settings["mcpServers"]!["playwright"]!;
-        Assert.Equal("cmd", (string?)browser["command"]);
-        Assert.Equal(4, browser["args"]!.AsArray().Count);
-        Assert.True((bool)browser["trust"]!);
-    }
-
-    [Fact]
-    public void Only_the_named_servers_may_run()
-    {
-        var spec = Spec(("jobapplier", JsonNode.Parse("""{"type":"http","url":"http://x"}""")!.AsObject()));
-
-        var allowed = GeminiSettings.Build(spec)["mcp"]!["allowed"]!.AsArray().Select(n => (string?)n);
-
-        Assert.Equal(new[] { "jobapplier" }, allowed);
-    }
-
-    [Fact]
-    public void The_only_built_in_tool_is_the_read_only_file_reader_and_the_risky_ones_are_refused()
-    {
-        var tools = GeminiSettings.Build(Spec())["tools"]!;
-
-        Assert.Equal(new[] { "read_file" }, tools["core"]!.AsArray().Select(n => (string?)n));
-        var refused = tools["exclude"]!.AsArray().Select(n => (string?)n).ToList();
-        foreach (var tool in new[] { "run_shell_command", "write_file", "replace", "web_fetch", "google_web_search" })
-            Assert.Contains(tool, refused);
-    }
-
-    [Fact]
-    public void The_prompt_carries_the_instructions_the_task_and_for_a_typed_result_the_schema()
-    {
-        var typed = GeminiCliAgent.BuildPrompt("BE CAREFUL", "Read the image.", "{\"type\":\"object\"}");
-        var free = GeminiCliAgent.BuildPrompt("BE CAREFUL", "Read the image.", null);
-
-        Assert.True(typed.IndexOf("BE CAREFUL", StringComparison.Ordinal) < typed.IndexOf("Read the image.", StringComparison.Ordinal));
-        Assert.Contains("=== RESULT FORMAT ===", typed);
-        Assert.Contains("{\"type\":\"object\"}", typed);
-        Assert.DoesNotContain("RESULT FORMAT", free);
-    }
-}
-
-public class GeminiAccountTests
-{
-    [Fact]
-    public void An_API_key_in_the_environment_counts_as_signed_in()
-    {
-        using var env = new TestEnv();
-        var service = new GeminiAccountService(new SettingsService(env.Paths), env.Root, v => v == "GEMINI_API_KEY" ? "k" : null);
-
-        var status = service.GetStatus();
-
-        Assert.True(status.LoggedIn);
-        Assert.Contains("GEMINI_API_KEY", status.Detail);
-    }
-
-    [Fact]
-    public void A_cached_Google_login_counts_and_signing_out_removes_it()
-    {
-        using var env = new TestEnv();
-        Directory.CreateDirectory(Path.Combine(env.Root, ".gemini"));
-        File.WriteAllText(GeminiCli.CredentialsFile(env.Root), "{}");
-        var service = new GeminiAccountService(new SettingsService(env.Paths), env.Root, _ => null);
-
-        Assert.True(service.GetStatus().LoggedIn);
-        Assert.Null(service.SignOut());
-        Assert.False(service.GetStatus().LoggedIn);
-        Assert.False(File.Exists(GeminiCli.CredentialsFile(env.Root)));
-    }
-
-    [Fact]
-    public void Signing_out_says_so_when_an_API_key_keeps_Gemini_working()
-    {
-        using var env = new TestEnv();
-        var service = new GeminiAccountService(new SettingsService(env.Paths), env.Root, v => v == "GOOGLE_API_KEY" ? "k" : null);
-
-        Assert.Contains("GOOGLE_API_KEY", service.SignOut());
-    }
-
-    [Fact]
-    public void Nothing_at_all_is_not_signed_in()
-    {
-        using var env = new TestEnv();
-        var service = new GeminiAccountService(new SettingsService(env.Paths), env.Root, _ => null);
-
-        var status = service.GetStatus();
-
-        Assert.False(status.LoggedIn);
-        Assert.Equal("Not signed in.", status.Detail);
-    }
-
-    [Fact]
-    public void A_configured_path_is_used_only_if_it_exists()
-    {
-        using var env = new TestEnv();
-        var real = Path.Combine(env.Root, "gemini.cmd");
-        File.WriteAllText(real, "@echo off");
-
-        Assert.Equal(real, GeminiCli.Locate(real));
-        Assert.Null(GeminiCli.Locate(Path.Combine(env.Root, "missing.cmd")));
-    }
 }
 
 public class ProviderSettingsTests
 {
     [Theory]
-    [InlineData("gemini", "gemini")]
-    [InlineData(" GEMINI ", "gemini")]
+    [InlineData("copilot", "copilot")]
+    [InlineData(" COPILOT ", "copilot")]
     [InlineData("claude", "claude")]
     [InlineData("", "claude")]
     [InlineData(null, "claude")]
     [InlineData("gpt", "claude")]
-    public void Anything_but_gemini_means_Claude(string? input, string expected) => Assert.Equal(expected, AiProvider.Normalize(input));
+    [InlineData("gemini", "claude")]   // a setting saved by an earlier version, which supported Gemini, still starts the app
+    public void Anything_but_copilot_means_Claude(string? input, string expected) => Assert.Equal(expected, AiProvider.Normalize(input));
 
     [Fact]
-    public void The_provider_is_saved_and_a_missing_Gemini_path_is_rejected()
+    public void The_provider_is_saved_and_a_missing_Copilot_path_is_rejected()
     {
         using var env = new TestEnv();
         var service = new SettingsService(env.Paths);
 
-        Assert.Null(service.Save(new AppSettings { Provider = "Gemini", GeminiModel = " gemini-2.5-flash " }));
-        Assert.Equal("gemini", service.Current.Provider);
-        Assert.Equal("gemini-2.5-flash", service.Current.GeminiModel);
+        Assert.Null(service.Save(new AppSettings { Provider = "Copilot", CopilotModel = " auto " }));
+        Assert.Equal("copilot", service.Current.Provider);
+        Assert.Equal("auto", service.Current.CopilotModel);
 
-        Assert.Contains("Gemini CLI path", service.Save(new AppSettings { Provider = "gemini", GeminiPath = Path.Combine(env.Root, "nope.cmd") }));
-        Assert.Equal("gemini", new SettingsService(env.Paths).Current.Provider); // the earlier, valid save is what is stored
+        Assert.Contains("Copilot CLI path", service.Save(new AppSettings { Provider = "copilot", CopilotPath = Path.Combine(env.Root, "nope.cmd") }));
+        Assert.Equal("copilot", new SettingsService(env.Paths).Current.Provider); // the earlier, valid save is what is stored
+    }
+
+    [Fact]
+    public void Settings_saved_by_the_version_that_supported_Gemini_still_load_and_run_on_Claude()
+    {
+        using var env = new TestEnv();
+        File.WriteAllText(env.Paths.SettingsFile, """{"Provider":"gemini","GeminiPath":"C:/old/gemini.cmd","GeminiModel":"gemini-2.5-pro","Model":"opus","MaxParallelJobs":4}""");
+
+        var settings = new SettingsService(env.Paths).Current;
+
+        Assert.Equal("claude", settings.Provider);
+        Assert.Equal("opus", settings.Model);
+        Assert.Equal(4, settings.MaxParallelJobs);
     }
 
     [Fact]
@@ -423,8 +210,8 @@ public class ProviderSettingsTests
         settings.Save(new AppSettings { Provider = "claude" });
         Assert.IsType<ClaudeCodeAgent>(factory.CreateStandalone("r", "i", Folder("w1"), Folder("p1")));
 
-        settings.Save(new AppSettings { Provider = "gemini" });
-        Assert.IsType<GeminiCliAgent>(factory.CreateStandalone("r", "i", Folder("w2"), Folder("p2")));
+        settings.Save(new AppSettings { Provider = "copilot" });
+        Assert.IsType<CopilotCliAgent>(factory.CreateStandalone("r", "i", Folder("w2"), Folder("p2")));
     }
 }
 

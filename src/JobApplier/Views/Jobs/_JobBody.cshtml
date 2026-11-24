@@ -45,6 +45,7 @@
         <p class="muted small">
             @(job.Options.AutoSubmit ? "Submits automatically." : "Waits for your approval before submitting.")
             @(job.Options.MinMatchPercent > 0 ? $"Skips below {job.Options.MinMatchPercent}% match." : "")
+            @(job.Options.RequireVisaOrRelocation ? "Applies only if the posting offers visa sponsorship or relocation." : "")
             Added @job.CreatedUtc.ToLocalTime().ToString("g").
         </p>
 
@@ -69,7 +70,8 @@
                                 data-retry-title="Retry this job when available"
                                 data-retry-note="It is retried by itself once the usage limit has reset, with the choices below."
                                 data-retry-go="Retry when available"
-                                data-retry-auto="@job.Options.AutoSubmit.ToString().ToLowerInvariant()" data-retry-min="@job.Options.MinMatchPercent">Retry when available</button>
+                                data-retry-auto="@job.Options.AutoSubmit.ToString().ToLowerInvariant()" data-retry-min="@job.Options.MinMatchPercent"
+                                data-retry-visa="@job.Options.RequireVisaOrRelocation.ToString().ToLowerInvariant()">Retry when available</button>
                     }
                 }
                 @if (job.Status != JobStatus.Applied)
@@ -80,9 +82,10 @@
                             data-retry-title="Retry this job"
                             data-retry-note="Work that already succeeded (reading the screenshot, finding the posting, the match score) is kept; the step that did not is done again."
                             data-retry-go="Retry"
-                            data-retry-auto="@job.Options.AutoSubmit.ToString().ToLowerInvariant()" data-retry-min="@job.Options.MinMatchPercent">@(job.LimitHit ? "Retry now" : "Retry")</button>
+                            data-retry-auto="@job.Options.AutoSubmit.ToString().ToLowerInvariant()" data-retry-min="@job.Options.MinMatchPercent"
+                            data-retry-visa="@job.Options.RequireVisaOrRelocation.ToString().ToLowerInvariant()">@(job.LimitHit ? "Retry now" : "Retry")</button>
                 }
-                @if (job.Status == JobStatus.Skipped && match != null && job.Options.MinMatchPercent > 0 && job.Apply == null)
+                @if (job.Status == JobStatus.Skipped && match != null && (job.Options.MinMatchPercent > 0 || job.Options.RequireVisaOrRelocation) && job.Apply == null)
                 {
                     <form method="post" asp-controller="Jobs" asp-action="Retry" asp-route-id="@job.Id">
                         <input type="hidden" name="applyAnyway" value="true" />
@@ -180,6 +183,20 @@
                 {
                     <h3>Gaps</h3>
                     <div class="chips">@foreach (var s in match.MissingSkills) { <span class="chip chip-gap">@s</span> }</div>
+                }
+                @if (match.SupportAssessed)
+                {
+                    string Wording(SupportLevel level) => level switch { SupportLevel.Offered => "offered", SupportLevel.NotOffered => "not offered", _ => "not mentioned" };
+                    string Tone(SupportLevel level) => level switch { SupportLevel.Offered => "chip chip-good", SupportLevel.NotOffered => "chip chip-gap", _ => "chip" };
+                    <h3>Visa and relocation</h3>
+                    <div class="chips">
+                        <span class="@Tone(match.VisaSponsorship)">Visa sponsorship: @Wording(match.VisaSponsorship)</span>
+                        <span class="@Tone(match.Relocation)">Relocation help: @Wording(match.Relocation)</span>
+                    </div>
+                    @if (!string.IsNullOrWhiteSpace(match.SupportEvidence))
+                    {
+                        <p class="muted small">The posting says: &ldquo;@match.SupportEvidence&rdquo;</p>
+                    }
                 }
             }
         </section>

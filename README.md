@@ -1,407 +1,222 @@
-# JobApplier
+<h1 align="center">JobApplier</h1>
 
-**Share a screenshot of any job. JobApplier applies for it.**
+<p align="center">
+  <b>Screenshot any job. An AI agent finds the real posting, fills in the application,<br/>and waits for your OK before it submits.</b>
+</p>
 
-It works for **any job** - any role, industry or company - and from any source: a LinkedIn or Indeed listing, a company
-careers page, a recruiter's message, a post someone shared. If the screenshot shows the role and the company, that is enough.
-One screenshot can show a single posting or a whole list of results; every job in it is handled, in parallel.
+<p align="center">
+  <a href="https://github.com/TanmayS0406/JobApplier/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/TanmayS0406/JobApplier?style=flat&logo=github"></a>
+  <img alt=".NET 10" src="https://img.shields.io/badge/.NET-10-512BD4?logo=dotnet&logoColor=white">
+  <img alt="Runs on Windows" src="https://img.shields.io/badge/runs%20on-Windows-0078D4?logo=windows&logoColor=white">
+  <img alt="Claude or GitHub Copilot" src="https://img.shields.io/badge/AI-Claude%20%7C%20GitHub%20Copilot-D97757">
+  <img alt="760+ tests" src="https://img.shields.io/badge/tests-760%2B-blue">
+  <img alt="PRs welcome" src="https://img.shields.io/badge/PRs-welcome-brightgreen">
+</p>
 
-In short:
+<p align="center">
+  <a href="#quick-start">Quick start</a> ·
+  <a href="#how-it-works">How it works</a> ·
+  <a href="#what-makes-it-different">Why it's different</a> ·
+  <a href="#documentation">Docs</a> ·
+  <a href="#help-wanted">Contribute</a>
+</p>
 
-1. Add your resume once, on the **Profile** page.
-2. Screenshot any job and drop it on the **Dashboard** (or paste it with `Ctrl+V`).
-3. Press **Start jobs**. You approve each application before it is sent, unless you turn on auto-submit.
+<!-- Put a demo GIF here (screenshot dropped on the dashboard -> job card -> "Needs you" -> submitted). It is the single biggest thing a README can add. -->
 
-> **Use at your own risk.** Automating applications can get an account flagged or banned on some sites, and an application sent
-> in your name is yours. Review-before-submit is on by default for that reason; leave it on until you trust the results.
+---
 
-## What it does
+Applying for jobs is the same form, typed again, fifty times. **JobApplier turns a screenshot into an application**: a LinkedIn
+or Indeed listing, a careers page, a recruiter's message, a post a friend shared. If the screenshot shows the role and the company,
+that is enough. One screenshot can hold a single posting or a whole page of results, and every job in it is handled **in parallel**.
 
-A local ASP.NET Core MVC app that turns **job screenshots into job applications**, using your own Claude or
-Google Gemini account (your choice in Settings). Drop in one or many screenshots; for each one it
+It is a local app that runs on **your own Claude or GitHub Copilot account** (OAuth sign-in, no API key), drives **a real, visible browser**, and
+keeps you in charge: by default every application stops at a review step until you say go.
 
-1. **reads the screenshot** (company, role, location, skills, description). A screenshot of a *list* of jobs is split: every
-   job in it becomes its own job, and all of them go through the steps below in parallel,
-2. **finds the real posting** on the employer's own careers site / applicant-tracking system,
-3. **scores it against your resume** and shows the result in a table,
-4. **fills in the application** in its own visible browser window - creating an account with a generated password when the
-   site needs one - and
-5. **records every account** (company, e-mail from your resume, password) and **every posting it applied to** (company, role,
-   URL) in one Word document on your Desktop, and never applies to the same posting twice.
+| 1. Add your resume | 2. Drop a screenshot | 3. Press **Start jobs** |
+|---|---|---|
+| Once, on the **Profile** page. | On the **Dashboard**, or paste it with `Ctrl+V`. | Look over each form, then approve it (or turn on auto-submit). |
 
-Anything only a person can do (CAPTCHA, e-mail verification, a question your profile cannot answer, the final OK) pauses
-that one job and asks you in the dashboard, while the other jobs keep running.
+## What makes it different
 
-Built with the **Microsoft Agent Framework**, **Claude** (signed in with OAuth through the Claude Code CLI - no API key) or
-**Gemini** (through Google's Gemini CLI: paste a free API key, or *Login with Google*) and the **Playwright MCP**
-server.
-
-## Requirements
-
-| | |
-|---|---|
-| .NET 10 SDK | to build and run |
-| Node.js 18+ | runs `npx @playwright/mcp` |
-| SQL Server | the free *Express* edition or *LocalDB* is enough. It holds the jobs and the job queue (see *The database and the queue*) |
-| Google Chrome (or Edge) | the browser the agent drives |
-| Claude Code CLI | <https://claude.com/claude-code> - needs a Claude Pro / Max / Team / Enterprise login |
-| *or* Gemini CLI | installed with one click from Settings (or `npm install -g @google/gemini-cli`) - then paste a Gemini API key or sign in with Google |
-
-## Run it
-
-```powershell
-dotnet run --project src/JobApplier
-```
-
-It listens on <http://127.0.0.1:5189> only (never on the network) and opens your browser.
-
-### The database and the queue
-
-Jobs are stored in SQL Server (through EF Core) and run from a Hangfire queue kept in the same database, so closing the app loses
-nothing. **Every start applies the database migrations by itself**: the `JobApplier` database is created if it is missing and brought
-up to the current schema, then Hangfire creates its own tables (schema `HangFire`) next to it. Nothing to run by hand.
-
-The connection string is `ConnectionStrings:JobApplier` in `appsettings.json`; it defaults to the Express instance on this PC with
-your Windows login:
-
-```
-Server=localhost\SQLEXPRESS;Database=JobApplier;Trusted_Connection=True;TrustServerCertificate=True;Encrypt=False
-```
-
-Point it elsewhere with the environment variable `ConnectionStrings__JobApplier`, for example LocalDB:
-`Server=(localdb)\MSSQLLocalDB;Database=JobApplier;Trusted_Connection=True`. If the database cannot be reached the app stops at start-up
-and says which setting to check.
-
-* **Closed or killed in the middle of work?** Start it again: every job that was not finished goes back in the queue, oldest first, and
-  continues **from the stage it had reached** (reading the screenshot, finding the posting and scoring are stored on the job and are not
-  redone). A job that was filling in a form starts that stage again; if the application had already gone through, the site says so and it
-  is recorded as applied.
-* **Out of tokens?** The job that hit the limit waits for the reset and **continues by itself**, with nothing to press: a recurring Hangfire
-  check looks every minute, and the wait survives restarts. Jobs that have not started are held back until the limit is over, so they do
-  not all fail the same way.
-* **The queue dashboard** (*Queue* in the menu, or <http://127.0.0.1:5189/hangfire>) shows what is waiting, running or scheduled for after a
-  limit. It is reachable from this PC only.
-* **Changing the data model?** Add a migration, and the next start applies it:
-  `dotnet ef migrations add <Name> --project src/JobApplier --output-dir Persistence/Migrations`.
-* **Coming from an earlier version?** The first start imports your old `jobs/<id>/job.json` files into the database and renames each to
-  `job.json.imported` (kept as a backup, never read again). A job the old version had left unfinished comes in as *Failed
-  (interrupted)* and is **not** restarted by itself - the file can be days old and there is no way to know whether its application went
-  through - so press Retry on it if you want it continued. The profile, settings, accounts and applications stay as the JSON files
-  they were.
-
-First run:
-
-1. **Settings -> pick the AI provider and sign in.** *Sign in with Claude* runs the CLI's own OAuth flow (`claude auth login`);
-   For Gemini the quickest way is to paste an API key (see below); *Sign in with Google* is the alternative. JobApplier never sees
-   your credentials. Already signed in to Claude Code or Gemini? It is picked up automatically. The header shows the status of
-   the provider in use.
-2. **Profile -> upload your resume** (PDF, Word, text or image). Claude reads it into the form: name, **e-mail** (used for every
-   account), phone, skills, and the full resume text. Correct anything wrong, and fill in what resumes do not say (work
-   authorisation, notice period, expected salary) - or leave it blank and be asked when a form needs it. Your file is kept
-   unchanged under the name you gave it, and that exact file is what every application uploads (the job log shows its name;
-   the Profile page has a link that opens it).
-3. **Dashboard -> drop screenshots -> Start jobs.**
-
-The dashboard updates live. A job that needs you shows an orange **Needs you** card with the right buttons, the tab title shows
-`(1) Needs you`, and a short beep plays. The browser window of that job is open and visible - solve the CAPTCHA (or do
-whatever it asks) in it, then press the button.
-
-### Auto-submit
-
-By default an application is **filled in but not submitted**: the job waits at a *review* step, you look at the form in the
-browser window, and press **Looks good - submit it**. Tick *Submit applications automatically* on the dashboard (or make it the
-default in Settings) once you trust it. There is also a *minimum match %* to skip poor fits.
-
-### Claude or Gemini
-
-The header shows both: one badge per provider (*Claude: ...*, *Gemini: ...*) saying whether its CLI is installed and signed in, and the
-one that runs the jobs is marked *in use*.
-
-*Settings -> AI provider* chooses what runs the jobs; it applies to the next job. Both providers read the screenshot, search, score,
-fill the form and ask you for help in the same way, and both are signed in with your own account. Differences to know about:
-
-* **Result format.** Claude's CLI enforces the typed result of each stage. Gemini's CLI has no such mode, so the format is asked for
-  in the prompt and the JSON object is taken from the answer; an answer without a usable object fails the stage (with a note to
-  check the employer's site first if it was the Apply step).
-* **Tools.** Each Gemini agent gets one built-in tool, a read-only file reader confined to the job's workspace; shell, file
-  writing and web tools are refused. Its MCP servers (the browser and this app) come from a settings file in the job's private
-  folder, so the app's token is never inside the agent's reach. The CLI ignores a "system settings" file kept in a folder it does not
-  consider admin-owned (always the case on Windows), so when an API key is used the file is placed in a per-run `GEMINI_CLI_HOME` in
-  that private folder as ordinary user settings, with the CLI's folder-trust check off (otherwise it disables the browser as "untrusted").
-* **Signing in to Gemini is three clicks at most.** In *Settings -> Gemini account*:
-  1. **Install Gemini CLI** (only shown when it is missing) opens a window that runs `npm install -g @google/gemini-cli`; the page
-     notices when it is done.
-  2. **Option A - paste an API key** (quickest): create a free key at <https://aistudio.google.com/apikey>, paste it and press *Save key*. Copy the whole key with the copy button on its row (AI Studio's list shows only the end of it); a pasted `GEMINI_API_KEY=...` line works too, and the newer key shape with a dot is accepted.
-     The app first asks Google whether the key works (so a typo is caught immediately, and a refused key is never saved), then
-     saves it as `GEMINI_API_KEY` in `~/.gemini/.env`, the file the Gemini CLI itself reads, so the CLI works the same outside this
-     app. It is shown masked (`AIza...ghij`) and *Remove saved key* deletes it. If Google cannot be reached the key is saved
-     with a note that it was not checked.
-  3. **Option B - sign in with Google** (**no longer works for personal Google accounts**: Google now answers "This client is no longer
-     supported for Gemini Code Assist for individuals"; the app shows that as a clear message and a warning on the Gemini badge in
-     the header, and asks for an API key instead. Workspace accounts may still work): opens the Gemini CLI; press Enter on *Login with Google*, choose your account in the
-     browser, and the app closes that window by itself once the login has landed (no `/quit`).
-* **Sign-in state.** Gemini has no "who am I" command: the app shows *signed in* when a cached Google login or an API key variable
-  exists. An expired login shows up as a clear error on the first job. *Sign out* removes the cached Google login; an API key in
-  the environment is left alone.
+- 🔎 **It finds the real posting.** A screenshot is only the starting point. The agent locates the job on the employer's own careers
+  site or applicant-tracking system and applies *there*. LinkedIn itself is never logged into or automated.
+- 🙋 **A human stays in the loop.** CAPTCHA, an e-mail verification code, a question your profile can't answer: that one job pauses
+  and asks you on the dashboard (orange **Needs you** card, tab-title alert, a short beep) while the others keep running.
+  Eligibility and legal questions are **asked, never guessed**.
+- ⚡ **Parallel by design.** Up to 8 jobs at once, each with its own agent process and its own browser window.
+- 🛂 **Apply only where the employer helps you move.** Tick *Only apply if the job offers visa sponsorship or relocation* and a job is
+  applied for only when its posting says so. A posting that is silent, or says no, is skipped, and *Apply anyway* overrides it.
+- 🔐 **Passwords never reach the model.** A strong password is generated per site and substituted *inside* the browser tool. The
+  agent only ever types a placeholder name, and tool output is redacted.
+- 💾 **Close it, kill it, reboot. Nothing is lost.** Jobs live in SQL Server behind a durable Hangfire queue and continue **from the
+  stage they reached**. Hit your Claude or Copilot usage limit? The job waits for the reset and **resumes by itself**.
+- 📬 **See who answered.** Optional reply tracking reads your Gmail through your Claude account's Gmail connector (read-only, **no
+  Google sign-in, no Cloud project**) and labels each application: received, moving forward, info requested, rejected, offer.
+- 📈 **Resume gap analysis.** The Insights page counts the skills your collected jobs keep asking for, ranks which single resume
+  change would lift the most of them over your match threshold, and refuses to suggest claiming anything your resume can't back up.
+- 🏠 **Local only.** The UI and its MCP endpoint listen on `127.0.0.1` and nowhere else. Your data stays on your PC, apart from what
+  the AI provider you picked needs to do the work.
 
 ## How it works
 
+```mermaid
+flowchart LR
+    S["📸 Job screenshot<br/>(one job or a whole list)"] --> E
+    subgraph W["One workflow per job, run in parallel"]
+        E["1 · Extract<br/>company, role, skills"] --> F["2 · Find<br/>the real posting on the employer's site"]
+        F --> M["3 · Match<br/>score against your resume"]
+        M --> A["4 · Apply<br/>fills the form in a visible browser"]
+    end
+    M -->|"below your minimum %"| X["⏭ Skipped"]
+    A --> R{"Review gate"}
+    R -->|"Looks good, submit"| D["✅ Submitted<br/>logged in your Word document"]
+    A -.->|"CAPTCHA · e-mail code · unknown question"| H["🙋 Needs you"]
+    H -.->|"you answer"| A
 ```
- Browser (dashboard)  --poll-->  ASP.NET Core MVC  ----------------------------------------------+
-        ^                          |  JobRunner (queue, N jobs in parallel)                      |
-        | Needs you / answers      v                                                             |
-        |                  Agent Framework workflow, one per job                                 |
-        |        Extract --> Find --> Match --> Apply        (conditional edges stop the chain)  |
-        |           |         |        |         |                                               |
-        |           v         v        v         v        each stage = a ClaudeCodeAgent         |
-        |       claude -p  (Claude Code CLI, your OAuth login, --restricted, no shell tools)     |
-        |           |  \                                                                         |
-        |           |   +--> Playwright MCP  (npx @playwright/mcp, own visible browser per job)  |
-        |           +------> JobApplier MCP  (http://127.0.0.1:5189/mcp/{jobId}, bearer token)   |
-        |                       wait_for_user . record_account . report_progress                 |
-        +-------------------------------------------------------------------------------------+
-```
 
-* **Claude with OAuth.** A subscription login can only be used through the official CLI, so `ClaudeCodeAgent` is a Microsoft
-  Agent Framework `AIAgent` whose model and tool loop is `claude -p --output-format stream-json`. Because it is a normal
-  `AIAgent`, typed results work with `RunAsync<T>` (via the CLI's `--json-schema`), and the stages are workflow executors.
-* **Locked down.** Each agent runs with `--restricted --strict-mcp-config --permission-mode dontAsk`: no shell or code tools,
-  only the two MCP servers above (never your own MCP setup), file access confined to the job's workspace folder, and
-  anything not explicitly allowed is denied rather than prompted.
-* **Parallel.** Each job is its own workflow with its own Claude process, its own Playwright MCP server and its own
-  browser window. *Settings -> Jobs at the same time* (default 3, at most 8) is the limit; extra jobs queue. A screenshot that
-  lists several jobs is split when it has been read: the first job stays with the screenshot's job, every other one is a new job
-  (same image, details already filled in) that joins the queue at once. Repeated entries in one screenshot (a list next to the
-  details pane of the selected job) count once. Two screenshots that overlap are not merged when they are read, but the
-  duplicate guard below still skips the second application.
-* **Sign-in fails -> new account.** If signing in does not work (wrong password, no such account), the agent creates a new
-  account with your e-mail and the generated password instead, and records it. Only when the site says the e-mail is already
-  registered - an account exists whose password the app does not have, and it cannot read your mailbox to reset it - does the
-  job pause and ask you.
-* **Passwords never reach the model.** The app generates a strong 16-character password per site and hands it to Playwright
-  through its `--secrets` file. The agent only ever types the *name* `JOB_PASSWORD`; Playwright substitutes the real value
-  inside the browser tool, and tool output is redacted. The password is also masked from the job log and never written to
-  the database. If a later job uses a site that already has an account, the saved password is reused and the agent signs in.
-* **Human in the loop.** `wait_for_user` returns after at most 45 s with *not yet*, and the agent calls it again. It must stay
-  under the Claude CLI's own 60 s limit for a tool call: a longer wait is aborted by the client, which then re-asks on its own
-  and can lose your answer. A wait can last as long as you need (default limit 45 min, then the job gives up).
-* **English only.** Everything a job asks you - the *Needs you* card, form questions, summaries - is written in English, even
-  when the employer's site is in Spanish or another language. The agent translates the question (and its options) for you and
-  translates your answer back into the form's language.
-* **Clearing failed jobs.** Every job is kept until you delete it. *Clear failed* in the Results header deletes all *Failed* jobs and
-  their files at once (after a confirmation). Running and queued jobs, jobs waiting for a usage limit, other results, accounts and the
-  applications list are not touched. (A job that was running when the app stopped is not failed: it continues when the app starts.)
-* **Retry all failed.** The button in the Results header queues every *Failed* job again, oldest first (a few at a time, as set in
-  Settings); finished stages are kept and *Applied* jobs are never touched. If a limit is still in force the jobs fail again and
-  the queue is held back, so nothing is lost by pressing it early - *Retry when available* is the patient version.
-* **Choose how a retry applies.** Every Retry button (*Retry all failed*, *Retry when available*, and *Retry* / *Retry now* on a job's
-  page) opens a small dialog with the same two choices as the upload form: **Submit applications automatically** and **Skip jobs that
-  match less than N%**. The dashboard buttons start from the upload form's defaults (Settings); a single job's button starts from that
-  job's own settings. What you choose replaces the job's settings before it is queued again, and is written in the job log. The
-  minimum is checked against the match score the job already has (finished work is kept), so lowering it lets a job that was skipped
-  for a low score go on, and raising it skips one that would have applied. *Retry when available* saves the choices on the job now and
-  the automatic retry uses them later. *Apply anyway* still ignores the minimum.
-* **Usage limits.** If the AI runs out of tokens or quota (Claude's "5-hour / weekly limit reached", Gemini's "429 RESOURCE_EXHAUSTED" and
-  similar), the job is marked *usage limit* instead of just *Failed*, with the reset time when the error gives one. New jobs that
-  have not started yet are held back until then (a banner says so, and they are scheduled in Hangfire for after it) instead of all
-  failing the same way. **The job that hit the limit retries by itself once the limit has reset**, continuing from the stage it
-  stopped at - no button to press, and also after an app restart, because the state is saved in the database. If no reset time was
-  given it probes again after 3, 10, 20, 30 then 60 minutes (hourly after that), and gives up after 200 automatic attempts (about a
-  week). **Stop waiting** cancels it; **Retry now** retries immediately. *Retry when available* is still there for a job you stopped
-  waiting for. Waiting jobs are never removed by *Clear failed*. A limit during the Apply step may happen after the form was already
-  submitted, so the job says to check the employer's site before retrying.
-* **Resumable.** Finished stages are stored on the job. *Retry* continues from the stage that failed; a *not found* job searches
-  again. An *Applied* job can never be retried.
-* **No double applications.** Two jobs for the same posting (same URL, ignoring tracking parameters) never both submit: the
-  second is skipped. The check and the claim happen under one lock, so parallel jobs cannot race. Every submitted posting is
-  also written to `applications.json` and the Desktop document, which outlive the job: deleting a job does not make its
-  posting applicable again.
-* **LinkedIn is never automated.** Screenshots are the only LinkedIn input; the agent is told never to log in to or browse
-  LinkedIn, because that breaks its terms and risks your account. It works on the employer's own site.
+Each stage is an executor in a [Microsoft Agent Framework](https://github.com/microsoft/agent-framework) workflow, backed by the
+Claude Code CLI (`claude -p`) or the GitHub Copilot CLI (`copilot -p`), each signed in with your own OAuth login. The agents are locked down: no shell or code
+tools, only a [Playwright MCP](https://github.com/microsoft/playwright-mcp) browser and this app's own tiny MCP server, with file
+access confined to the job's workspace.
 
-### The match score
+**The match score is computed by the app, not the model**, so it is stable: the agent rates five dimensions 0-100 from evidence in
+your resume, and the app weights them as `skills 40% + experience 25% + domain 15% + seniority 10% + logistics 10%`.
 
-The agent scores five dimensions 0-100 from evidence in the resume; the app computes the percentage itself so it is stable:
+The full tour (the architecture, human-in-the-loop details, duplicate guard, usage limits, retries) is in
+[docs/how-it-works.md](docs/how-it-works.md).
 
-`skills 40% + experience 25% + domain 15% + seniority 10% + logistics 10%`
+## Quick start
 
-The details page shows each part, the skills you have, and the gaps.
+**You need**
 
-### Long lists: pages, sort by match, filter by match
-
-The *Results* table and the *Replies from employers* card are shown a page at a time (10, 25, 50 or 100 per page). Under each title:
-
-* **Sort**: newest first (the default), **match high to low**, **match low to high** (jobs also: company A-Z). A job that has no match
-  percentage yet always comes last, whichever way the percentage is sorted.
-* **Match at least**: only items whose match percentage is at or above 50, 60, 70, 80 or 90%. A job that has not been scored yet is left
-  out while a filter is on. A reply has the match of the job it answers (shown on the reply as "87% match").
-* The totals ("27 jobs", "Retry all failed (8)", the reply counts per kind) always cover **everything**, not only the page you are on.
-
-The page, sort and filter are kept in the address (`jobs_page`, `jobs_sort`, `replies_min`, ...), so a reload or a copied link shows the
-same page, and the list keeps refreshing by itself without jumping back to the first page.
-
-## Resume gaps (Insights)
-
-The **Insights** page answers "what should my resume say so that more of the jobs I collect are worth applying for?". It works on the jobs that already have a match score:
-
-- **Skill gaps.** The "missing skills" of every job are counted. Different wordings of one skill ("K8s", "Kubernetes", "Docker and Kubernetes (not shown)") are merged; soft skills and requirements about you (work permit, location) are listed apart because a resume cannot add them.
-- **What to change first.** A greedy plan picks, step by step, the skill that lifts the most jobs over your threshold (60-80%, default from the dashboard minimum). Points per skill come from a regression fitted to your own scores when the data supports it (**Math.NET Numerics**), otherwise from an equal-share assumption, and the page says which. The expected result comes with a range from a Monte Carlo simulation.
-- **Keywords and job families.** **ML.NET** builds a TF-IDF text model of the posting texts (only those in your resume's language) and groups them with K-Means; words many postings use and the resume does not are listed.
-- **Claude's advice (on request).** Pressing the button sends your resume text and the skills found to the selected AI provider. Every suggestion is checked afterwards: it must be about a skill from the list, "show it" needs a quote that is really in your resume, and wording with a number the resume does not contain is dropped. Skills your resume does not support are listed as "learn first" - the page never suggests claiming what is not true.
-
-Limits, also stated on the page: the text similarity agrees only weakly with Claude's scores, the plan is a greedy approximation, and it describes the jobs you collected, not the market. Nothing leaves your computer except when you press the Claude button.
-
-## The accounts document
-
-`JobApplier-Accounts.docx` on your Desktop (change it in Settings), with two tables:
-
-* **Accounts** - one row per **site and e-mail**: company, role(s), site, e-mail, password, date.
-* **Applications** - one row per **posting applied to**: company, role, posting URL, result (*Submitted* or *Already applied*),
-  date. A new job whose posting URL matches a row here is skipped. The skip check reads `applications.json`, not the
-  document, so editing the document does not change what is skipped; to apply to a posting again on purpose, delete its entry
-  from `applications.json` (with the app stopped) and press *Rebuild document*.
-
-It is rebuilt from `accounts.json` and `applications.json` on every change, so if Word has it open the data is safe and
-*Settings -> Rebuild document* writes it once you close Word.
-
-**It contains passwords in plain text.** Keep it private (or move it somewhere encrypted).
-
-## Gmail replies
-
-Turn on reply tracking (the **Start tracking replies** button on the dashboard, or *Settings -> Gmail replies*) and the dashboard shows
-**which employers answered** each application, and what they said: **received**, **moving forward** (interview, call, assessment, next steps), **info requested**, **rejected** or **offer**.
-The results table has an **Employer reply** column: each application shows its latest answer (with the subject and how long ago), or
-*no reply yet*; the *Replies from employers* card above it lists the mails with a link that opens each in Gmail. It works in English and Spanish.
-
-**There is no Google sign-in and no Google Cloud project.** Claude reads your Gmail through the **Gmail connector of your Claude
-account**, the same one you can use in Claude itself. To set it up:
-
-1. Be signed in to Claude (the Claude card in Settings).
-2. Connect Gmail to your Claude account: press *Open Claude to connect Gmail* (a Claude window opens; once its prompt is up, type `/mcp` - right after start-up the connectors are not loaded yet - and choose
-   *claude.ai Gmail*, then *Authenticate*), or add *Gmail* at claude.ai -> Settings -> Connectors. Then press *Check connection*.
-3. Press *Start tracking replies* (on the dashboard or here). It first checks that Claude can really use Gmail and, if not, says what is
-   missing instead of turning anything on.
-
-Nothing reads your mailbox until you press *Start tracking replies*. After that it is checked by itself every few hours (6 by default,
-0 = only when you press *Check for replies now*; set in Settings), and never while the Claude usage limit is holding jobs back.
-
-How it works, and what to know:
-
-* **The connector status comes from a live Claude session**, not from `claude mcp list`, which can report a connector as "Connected"
-  that a real session cannot use (it is then `needs-auth`). The app starts Claude just long enough to read which connectors it has,
-  then stops it.
-* **Read-only, enforced by name.** A scan runs Claude with *only* the connector's tools that search and read mail
-  (`GmailToolPolicy`), no file, shell or web tools, and a permission mode that refuses everything else. Any Gmail tool that could send,
-  draft, label, move or delete is refused explicitly. Mail text is treated as data: the prompt tells Claude never to follow
-  instructions found in a message, and even a message that tried would have nothing to act with.
-* **Your mail is processed by Claude (Anthropic)**, under your Claude account, like anything else you ask Claude about your mail. It is
-  not sent anywhere else, and no other AI sees it (the Gemini provider is not involved). JobApplier keeps only the sender, subject, a
-  short snippet and the verdict of each reply (`replies.json`), never the messages.
-* **It uses some of your Claude usage.** A small model reads the mailbox (Haiku by default, changeable in Settings) and only the last
-  few days are looked at after the first check.
-* **Claude decides which application a mail answers and what it says**, so it can be wrong. What it reports is checked before it is
-  stored (it must name one of the applications asked about, have a message id and not predate the application). A doubtful reply
-  carries a *check* tag, and *Not about this job* removes a wrong match for good.
-
-## Settings
-
-| Setting | Meaning |
+| | |
 |---|---|
-| AI provider | `claude` (Claude Code CLI) or `gemini` (Gemini CLI). |
-| Claude model / Effort | Claude model alias (`sonnet`, `opus`, `haiku`, `fable`) or id; effort `low`...`max`. Empty = Claude Code default. |
-| Gemini model | a Gemini model id such as `gemini-2.5-pro`. Empty = the Gemini CLI's default. |
-| Jobs at the same time | 1-8, default 3. |
-| Browser / Headless | `chrome` (default), `msedge`, `firefox`, `webkit`. Headless hides the window - you cannot solve a CAPTCHA you cannot see. |
-| Playwright MCP version | pinned (`0.0.85`) so a new release cannot change behaviour under you. |
-| Defaults | auto-submit and minimum match % pre-filled on the dashboard. |
-| Help timeout | how long a job waits for you before giving up. |
-| Mail model / Check every | the model that reads the mailbox for replies (default `haiku`) and how often, in hours, it is checked once tracking is on (default 6, 0 = only when asked). |
-| Accounts document / Claude CLI path / Gemini CLI path | override the defaults. |
+| **Windows** | Built and tested on Windows. macOS and Linux are not supported yet (see [Help wanted](#help-wanted)). |
+| **.NET 10 SDK** | to build and run |
+| **Node.js 18+** | runs `npx @playwright/mcp` |
+| **SQL Server** | the free *Express* edition or *LocalDB* is enough |
+| **Chrome or Edge** | the browser the agent drives |
+| **An AI account** | the [Claude Code CLI](https://claude.com/claude-code) (needs a Claude Pro / Max / Team / Enterprise login) **or** the [GitHub Copilot CLI](https://docs.github.com/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli) with a GitHub account that has Copilot; Settings can install it for you |
 
-## Where things are stored
-
-The jobs and the queue are in the SQL Server database (see *The database and the queue*): the `Jobs` table holds each job - its status,
-the results of each stage and the log (passwords are never stored) - and Hangfire's tables are in the `HangFire` schema.
-
-The files are in `%LOCALAPPDATA%\JobApplier` (override with `JobApplier:DataFolder`):
-
-```
-settings.json  profile.json  accounts.json  applications.json
-replies.json  mail-state.json   employer replies found in Gmail, and whether tracking is on and when it last ran
-resume-advice.json           the last advice of the resume coach (Insights)
-mail-workspace/              an empty folder the mailbox reader runs in
-resume/                      your resume copy
-jobs/<id>/job.json.imported  the job as an earlier version saved it (only if you upgraded; a backup, no longer read)
-jobs/<id>/screenshot.*       the uploaded image
-jobs/<id>/workspace/         the agent's working folder (screenshot, resume copy, browser output)
-jobs/<id>/private/           MCP config + secrets file - outside the workspace, so the agent cannot read it
-```
-
-## Security and privacy
-
-* The UI and the MCP endpoint bind to loopback only; `AllowedHosts` is `localhost;127.0.0.1`. Forms use anti-forgery tokens and the
-  page has a strict Content-Security-Policy (no inline scripts or styles). The MCP endpoint needs a random per-process bearer token.
-* Uploaded "screenshots" are checked by content, not by file name.
-* Web pages, screenshots and job descriptions are treated as **untrusted data**: the agent is instructed never to follow
-  instructions found in them, never to type your details anywhere but the application form, and never to pay, download or
-  install anything. Instructions are a strong default, not a guarantee - which is one more reason to leave auto-submit off until
-  you have watched a few runs.
-* **Your resume and profile are sent to the AI provider you selected (Anthropic for Claude, Google for Gemini)** because the agent
-  needs them to fill forms and score fit. Nothing is sent anywhere else.
-* The job log shows what the agent *did* ("typed into *Password field*"), never what it typed.
-* Gmail (optional) is read by Claude through your Claude account's Gmail connector, with read-only tools only - see *Gmail replies*
-  above. This app holds no Google credential. The mail text is processed by Claude (Anthropic), is never logged, and only a short
-  snippet and the verdict of each reply are kept on this PC.
-
-## Things to know
-
-* **E-mail verification:** the job agent cannot read your inbox (the optional reply tracking is a separate, read-only Claude run that
-  only reports replies, and is not available to the job agent). When a site sends a code or link it asks you to do it in the browser window, then continues.
-* **Not every site works.** Standard forms on Greenhouse, Lever, Ashby, SmartRecruiters and many company sites do; heavily
-  customised portals, "Easy Apply inside LinkedIn", or sites that block automation may need your help or fail. A failed job keeps its
-  log, so you can see how far it got.
-* The agent answers form questions only from your profile and saved answers. Eligibility and legal questions it cannot answer
-  are **asked, not guessed**; your answer is saved and reused (one-off confirmations are not).
-* Voluntary self-identification questions are answered *prefer not to say* unless your profile says otherwise.
-* Each stage costs usage from your Claude subscription or Gemini account; a typical job is a few minutes of agent time.
-
-## Project layout
-
-```
-src/JobApplier/
-  Agents/     Prompts, AgentFactory, JobWorkflow (the four stages as Agent Framework executors)
-  Claude/     CliAgent (the shared AIAgent base), ClaudeCodeAgent + ClaudeCli, GeminiCliAgent + GeminiCli + GeminiStream
-              (decoder, settings file), tool-activity log lines
-  Mail/       Gmail replies: ClaudeMailReader (connector probe + read-only scan), GmailToolPolicy, MailScanPrompt, MailChecker +
-              MailWatcher, ReplyStore
-  Insights/   resume gap analysis: SkillNormalizer, TF-IDF + K-Means (ML.NET), calibration + coverage plan (Math.NET), ResumeCoach
-  Mcp/        JobMcpServer - wait_for_user, record_account, report_progress
-  Persistence/ the EF Core model (JobApplierDbContext), Migrations/, EfJobPersistence, start-up migration, import of the old job.json files
-  Services/   JobRunner (the Hangfire job: parallel limit, usage-limit hold + auto-retry, resume after a restart), JobQueue (Hangfire),
-              JobStore, HumanHelpBroker, AccountService + AccountsDocument (.docx), ProfileService/Importer,
-              Claude/GeminiAccountService, ...
-  Controllers/ Views/ wwwroot/   the dashboard, job details, profile and settings pages
-tests/JobApplier.Tests/   xUnit
-```
-
-## Tests
+**Run it**
 
 ```powershell
-dotnet test
+git clone https://github.com/TanmayS0406/JobApplier.git
+cd JobApplier
+dotnet run --project src/JobApplier
 ```
 
-The unit tests cover password generation and redaction, the stream parser, the MCP protocol, the help broker, the Word document
-writer, account reuse, the duplicate guard, the JSON schemas the CLI accepts, and how the Agent Framework routes messages
-between stages. The queue is covered without any AI agent or SQL Server: the EF mapping runs on a throw-away SQLite file per test,
-Hangfire is replaced by a recording queue, and the tests check queuing, cancelling, the parallel limit, a limit that ends and brings
-the job back, the app being closed mid-run, and a restart that continues from the stage reached. Separate tests check that the
-migrations match the model and never use the `json` column type that SQL Server 2022 lacks. The Gmail part is covered against a fake `claude` CLI (a script that answers from a scenario file and records how it was
-called): the connector probe, the read-only tool restriction and the exact arguments of a scan, a connector that needs sign-in or
-drops out, usage limits, timeouts, and what is accepted from Claude's answer.
+It opens <http://127.0.0.1:5189> in your browser. On the first start it **creates and migrates its own database**, so there is
+nothing to set up by hand. (A different SQL Server? Set `ConnectionStrings__JobApplier`; see
+[the database and the queue](docs/queue-and-database.md).)
 
-The Gmail pages were also driven in a real browser (Settings card, the replies card). What has **not** been tested is a live read of a
-real mailbox, because that needs your Gmail connector to be signed in in your Claude account.
+**First run, in three steps**
 
-The whole pipeline was also checked live against the real Claude CLI, a real browser and a local fake company portal (CAPTCHA
-wall, sign-up with a password policy, file upload, a question the profile could not answer, a review gate): three jobs in
-parallel, cancellation (no `claude` / browser processes left behind), account reuse, and the duplicate guard.
+1. **Settings** → pick Claude or GitHub Copilot and sign in (a window and your browser open for the CLI's own OAuth sign-in). Already signed in to either CLI? It's picked up automatically.
+2. **Profile** → upload your resume (PDF, Word, text or image). It is read into the form; fix anything wrong and fill in what
+   resumes don't say (work authorisation, notice period, expected salary), or leave it blank and be asked when a form needs it.
+3. **Dashboard** → drop screenshots → **Start jobs**. Applications are *filled in but not submitted*; check the form in the browser
+   window and press **Looks good - submit it**.
+
+More detail, including auto-submit and the GitHub Copilot sign-in walkthrough: [docs/getting-started.md](docs/getting-started.md) and
+[docs/ai-providers.md](docs/ai-providers.md).
+
+> [!WARNING]
+> **Use at your own risk.** Automating applications can get an account flagged or banned on some sites, and an application sent in
+> your name is yours. That is why review-before-submit is on by default. Leave it on until you have watched a few runs.
+
+## Everything it does
+
+| | |
+|---|---|
+| **Reads screenshots** | company, role, location, skills, description, from any source. A screenshot of a *list* is split into one job per entry. |
+| **Scores every job** | a weighted match against your resume, with the skills you have and the gaps shown on each job's page. |
+| **Filters for visa and relocation** | optionally skips jobs whose posting does not offer visa sponsorship or relocation help, and shows what the posting said. |
+| **Fills in applications** | creates an account with a generated password when the site needs one, signs in again later, uploads your exact resume file. |
+| **Never applies twice** | the same posting URL (tracking parameters ignored) is claimed under one lock, so parallel jobs can't race. |
+| **Keeps records** | one Word document on your Desktop with every account (site, e-mail, password) and every application (company, role, URL). |
+| **Survives interruptions** | durable queue, per-stage checkpoints, automatic wait-and-resume on usage limits, a queue dashboard at `/hangfire`. |
+| **Retries on your terms** | *Retry all failed*, *Retry when available*, and a dialog to choose auto-submit and minimum match for each retry. |
+| **Sorts and filters** | results and replies by newest or match %, filtered by "match at least 50-90%", paged, and kept in the URL. |
+| **Tracks employer replies** | optional, read-only, English and Spanish. See [docs/gmail-replies.md](docs/gmail-replies.md). |
+| **Explains your gaps** | skill gaps, a "what to change first" plan with a Monte Carlo range, and job families. See [docs/resume-insights.md](docs/resume-insights.md). |
+
+## Safe by default
+
+- **Review before submit** is on until *you* turn auto-submit on, and there is a *minimum match %* to skip poor fits.
+- **Web pages, screenshots and job descriptions are treated as untrusted data.** The agent is told never to follow instructions found
+  in them, never to type your details anywhere but the application form, and never to pay, download or install anything.
+- **Strict by construction.** Agents run with `--strict-mcp-config` and a permission mode that denies anything not explicitly
+  allowed; the Gmail scan is limited, by tool name, to the connector's search and read tools.
+- **The job log shows what the agent *did* ("typed into *Password field*"), never what it typed.**
+- Anti-forgery tokens on every form, a strict Content-Security-Policy, and a per-run bearer token on the MCP endpoint.
+
+> Instructions to an AI model are a strong default, not a guarantee. Details and limits: [docs/security-and-privacy.md](docs/security-and-privacy.md).
+
+## Honest limits
+
+- **Not every site works.** Standard forms on Greenhouse, Lever, Ashby, SmartRecruiters and many company sites do. Heavily
+  customised portals, "Easy Apply inside LinkedIn", and sites that block automation may need your help or fail. A failed job keeps
+  its log so you can see how far it got.
+- **Windows only for now.** The sign-in and install windows, and the browser lookup, are Windows-specific.
+- **It uses your AI quota.** A typical job is a few minutes of agent time on your Claude subscription or GitHub Copilot account.
+- **The GitHub Copilot provider has not been run against a live Copilot account yet.** It follows the CLI's documented interface and is
+  covered by tests against a stand-in `copilot`; Claude is the provider that has been run end to end. Reports from real Copilot runs are welcome.
+- **A job only counts as offering visa sponsorship or relocation if its posting says so.** A posting that is silent is skipped when you
+  ask for that, and a screenshot of a list entry has little text to go on.
+- **Gmail reply tracking has not been tested against a real mailbox yet.** It is covered against a fake `claude` CLI; reports from real use are welcome.
+
+## Under the hood
+
+| | |
+|---|---|
+| **App** | ASP.NET Core MVC on .NET 10, live-updating dashboard |
+| **Agents** | [Microsoft Agent Framework](https://github.com/microsoft/agent-framework) workflows; `ClaudeCodeAgent` and `CopilotCliAgent` are real `AIAgent`s over the CLIs |
+| **Browser** | [Playwright MCP](https://github.com/microsoft/playwright-mcp), pinned to a version so a release can't change behaviour under you |
+| **Queue and data** | Hangfire + SQL Server through EF Core, with migrations applied at start-up |
+| **Analytics** | ML.NET (TF-IDF, K-Means) and Math.NET Numerics (regression, Monte Carlo) |
+| **Documents** | Open XML SDK writes the accounts document |
+| **Tests** | xUnit, 760+ tests. The AI CLI is replaced by a fake that records its arguments; SQLite stands in for SQL Server |
+
+Beyond the unit tests, the whole pipeline was run live against the real Claude CLI, a real browser and a local fake company portal
+(CAPTCHA wall, sign-up with a password policy, file upload, a question the profile couldn't answer, a review gate): three jobs in
+parallel, cancellation with no leftover processes, account reuse and the duplicate guard.
+
+## Documentation
+
+| | |
+|---|---|
+| [Getting started in detail](docs/getting-started.md) | first run, auto-submit |
+| [How it works](docs/how-it-works.md) | architecture, locked-down agents, passwords, human help, retries, usage limits, match score |
+| [Claude or GitHub Copilot](docs/ai-providers.md) | differences between providers, Copilot sign-in |
+| [The database and the queue](docs/queue-and-database.md) | SQL Server, Hangfire, restarts, migrations, upgrading |
+| [Gmail replies](docs/gmail-replies.md) | setup, what is read, what is kept |
+| [Resume gaps (Insights)](docs/resume-insights.md) | how the analysis works and its limits |
+| [Configuration and data](docs/configuration.md) | every setting, where files live, the accounts document |
+| [Security, privacy and known limits](docs/security-and-privacy.md) | what leaves your PC and what doesn't |
+| [Development](docs/development.md) | project layout, running the tests |
+
+## Help wanted
+
+JobApplier is young and there is a lot of room to help. Good places to start:
+
+- 🖥️ **macOS and Linux support.** The sign-in windows go through `cmd.exe` and the browser lookup uses Windows paths.
+- 🧪 **Tell us which sites work.** Run it against more applicant-tracking systems and open an issue with what worked or failed.
+- 🤖 **Try the GitHub Copilot provider with a real account.** It is built from the CLI's documented interface and tested against a stand-in, so a
+  report from a live run (what worked, what the job log says when it did not) is the most useful thing you can send.
+- 🌍 **More languages** for reply detection (English and Spanish today) and for the questions the agent asks you.
+- 🎬 **A demo GIF or screenshots** of the dashboard. Every README needs one, and this one doesn't have one yet.
+- 🐛 **Bug reports** from real runs are the most useful thing there is.
+
+```powershell
+dotnet test        # run the whole suite; no AI account or SQL Server needed
+```
+
+See [docs/development.md](docs/development.md) for the project layout. Pull requests are welcome.
+
+---
+
+<p align="center">
+  <b>⭐ If JobApplier saves you an evening of pasting your resume into forms, a star helps other job-seekers find it.</b><br/>
+  Built by <a href="https://github.com/TanmayS0406">TanmayS0406</a>. <a href="https://github.com/TanmayS0406">Follow</a> for updates.
+</p>

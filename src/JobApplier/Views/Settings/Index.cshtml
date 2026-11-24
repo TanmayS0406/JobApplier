@@ -22,53 +22,47 @@
 </section>
 
 <section class="card">
-    <h2>Gemini account @if (Model.Provider == "gemini") { <span class="chip chip-good">in use</span> }</h2>
+    <h2>GitHub Copilot account @if (Model.Provider == "copilot") { <span class="chip chip-good">in use</span> }</h2>
     <p class="muted">
-        Run the jobs on Google's Gemini instead of Claude. Pick the easier of the two ways to sign in. JobApplier never sees a Google
-        password: the key or the login is kept by the Gemini CLI itself.
+        Run the jobs on GitHub Copilot instead of Claude, with your own GitHub account through the official GitHub Copilot CLI. It needs an
+        active GitHub Copilot subscription (your own, or one your organisation gives you). JobApplier never sees your GitHub credentials:
+        <em>Sign in</em> opens GitHub's own OAuth sign-in and the CLI keeps the token.
     </p>
-    <div id="gemini-account" data-status-url="@Url.Action("GeminiStatus", "Settings")"
-         data-signin-url="@Url.Action("GeminiSignIn", "Settings")" data-signout-url="@Url.Action("GeminiSignOut", "Settings")"
-         data-install-url="@Url.Action("GeminiInstall", "Settings")" data-savekey-url="@Url.Action("GeminiSaveKey", "Settings")"
-         data-removekey-url="@Url.Action("GeminiRemoveKey", "Settings")"
-         data-provider="Gemini" data-install-hint="Gemini CLI not installed yet - use the Install button below.">
-        <p id="gemini-account-text" class="account-text">Checking...</p>
+    <div id="copilot-account" data-status-url="@Url.Action("CopilotStatus", "Settings")"
+         data-signin-url="@Url.Action("CopilotSignIn", "Settings")" data-signout-url="@Url.Action("CopilotSignOut", "Settings")"
+         data-install-url="@Url.Action("CopilotInstall", "Settings")"
+         data-provider="GitHub Copilot" data-install-hint="GitHub Copilot CLI not installed yet - use the Install button below.">
+        <p id="copilot-account-text" class="account-text">Checking...</p>
 
-        <div id="gemini-install" class="step" hidden>
-            <strong>Step 1 - install the Gemini CLI</strong>
-            <p class="muted small">It is not installed on this PC. One click opens a window that installs it (needs Node.js, which this app already uses).</p>
+        <div id="copilot-install" class="step" hidden>
+            <strong>Step 1 - install the GitHub Copilot CLI</strong>
+            <p class="muted small">
+                It is not installed on this PC. One click opens a window that installs it with winget, or with npm when winget is missing
+                (npm needs Node.js 22 or newer).
+            </p>
             <div class="actions">
-                <button type="button" class="btn primary" id="gemini-install-btn">Install Gemini CLI</button>
-                <span id="gemini-install-msg" class="muted small"></span>
+                <button type="button" class="btn primary" id="copilot-install-btn">Install GitHub Copilot CLI</button>
+                <span id="copilot-install-msg" class="muted small"></span>
             </div>
         </div>
 
         <div class="step">
-            <strong>Option A - paste an API key <span class="chip chip-good">quickest</span></strong>
+            <strong>Sign in with GitHub</strong>
             <p class="muted small">
-                Create a free key at <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer">Google AI Studio</a>
-                (sign in with Google, press <em>Create API key</em>), paste it here and press Save. It is checked with Google first, then saved in
-                <code>~/.gemini/.env</code>, where the Gemini CLI reads it.
+                Opens a window running <code>copilot login</code>. Your browser opens on GitHub (or the window shows a one-time code to enter at
+                github.com/login/device); allow <em>GitHub Copilot CLI</em> and this page notices the sign-in.
+                <em>Sign out</em> opens the CLI, where you type <kbd>/logout</kbd>.
             </p>
             <div class="actions">
-                <input id="gemini-key" type="password" class="grow" autocomplete="off" spellcheck="false" placeholder="Paste the whole key" />
-                <button type="button" class="btn primary" id="gemini-key-save">Save key</button>
-                <button type="button" class="btn ghost" id="gemini-key-remove">Remove saved key</button>
+                <button type="button" class="btn primary" id="copilot-signin">Sign in with GitHub</button>
+                <button type="button" class="btn ghost" id="copilot-signout">Sign out</button>
             </div>
-            <p id="gemini-key-msg" class="muted small"></p>
         </div>
 
-        <div class="step">
-            <strong>Option B - sign in with your Google account</strong>
-            <p class="muted small">
-                Opens the Gemini CLI. In the window, press <kbd>Enter</kbd> on <em>Login with Google</em>, then choose your account in the browser.
-                This page notices the login and closes that window for you.
-            </p>
-            <div class="actions">
-                <button type="button" class="btn" id="gemini-signin">Sign in with Google</button>
-                <button type="button" class="btn ghost" id="gemini-signout">Sign out</button>
-            </div>
-        </div>
+        <p class="muted small">
+            Prefer a token (for example on a server)? Set <code>COPILOT_GITHUB_TOKEN</code> to a fine-grained personal access token that has the
+            <em>Copilot Requests</em> permission. Classic tokens (<code>ghp_...</code>) are not accepted by the CLI.
+        </p>
     </div>
 </section>
 
@@ -160,10 +154,10 @@
             <label class="wide">AI provider
                 <select name="Provider">
                     <option value="claude" selected="@(Model.Provider == "claude")">Claude Code (your Claude subscription)</option>
-                    <option value="gemini" selected="@(Model.Provider == "gemini")">Gemini CLI (your Google account or a Gemini API key)</option>
+                    <option value="copilot" selected="@(Model.Provider == "copilot")">GitHub Copilot CLI (your GitHub account with Copilot)</option>
                 </select>
                 <small>Applies to the next job. Both read the screenshot, search, score, fill the form and ask you for help the same way.
-                    With Gemini the result format is requested in the prompt rather than enforced by the CLI.</small>
+                    With Copilot the result format is requested in the prompt rather than enforced by the CLI.</small>
             </label>
             <label>Claude model
                 <input name="Model" value="@s.Model" list="models" placeholder="empty = Claude Code default" />
@@ -177,9 +171,10 @@
                     }
                 </select>
             </label>
-            <label>Gemini model
-                <input name="GeminiModel" value="@s.GeminiModel" list="gemini-models" placeholder="empty = Gemini CLI default" />
-                <datalist id="gemini-models"><option value="gemini-2.5-pro"></option><option value="gemini-2.5-flash"></option></datalist>
+            <label>GitHub Copilot model
+                <input name="CopilotModel" value="@s.CopilotModel" list="copilot-models" placeholder="empty = Copilot CLI default" />
+                <datalist id="copilot-models"><option value="auto"></option></datalist>
+                <small><code>auto</code> lets Copilot pick; or name a model your plan offers (run <code>copilot --help</code> or use <code>/model</code> in the CLI to see them).</small>
             </label>
             <label>Jobs at the same time<input name="MaxParallelJobs" type="number" min="1" max="8" value="@s.MaxParallelJobs" /></label>
             <label>Help timeout (minutes)<input name="HelpTimeoutMinutes" type="number" min="2" max="240" value="@s.HelpTimeoutMinutes" /></label>
@@ -230,6 +225,11 @@
                     <small>When off, every application waits for your approval before the final Submit.</small></span>
             </label>
             <label>Default minimum match %<input name="DefaultMinMatchPercent" type="number" min="0" max="100" value="@s.DefaultMinMatchPercent" /></label>
+            <label class="check wide">
+                <input type="checkbox" name="DefaultRequireVisaOrRelocation" value="true" @(s.DefaultRequireVisaOrRelocation ? "checked" : null) />
+                <span><strong>Only apply if the job offers visa sponsorship or relocation, by default</strong>
+                    <small>Pre-ticks that choice on the dashboard. The posting must say so; otherwise the job is skipped.</small></span>
+            </label>
             <label class="wide">Accounts document (.docx)
                 <input name="AccountsDocumentPath" value="@s.AccountsDocumentPath" placeholder="@Model.AccountsDocumentPath" />
                 <small>Empty = <code>JobApplier-Accounts.docx</code> on your Desktop.</small>
@@ -237,8 +237,8 @@
             <label class="wide">Claude CLI path
                 <input name="ClaudePath" value="@s.ClaudePath" placeholder="empty = find claude.exe automatically" />
             </label>
-            <label class="wide">Gemini CLI path
-                <input name="GeminiPath" value="@s.GeminiPath" placeholder="empty = find gemini.cmd automatically" />
+            <label class="wide">GitHub Copilot CLI path
+                <input name="CopilotPath" value="@s.CopilotPath" placeholder="empty = find copilot.exe / copilot.cmd automatically" />
             </label>
         </div>
         <p class="muted small">Data folder: <code>@Model.DataFolder</code></p>

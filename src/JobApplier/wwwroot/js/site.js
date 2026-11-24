@@ -151,7 +151,7 @@
 
     // ---------- Retry dialog: submit automatically / the lowest match worth applying for ----------
     // Any button with data-retry-open opens the one dialog (placed outside the areas that refresh themselves) and tells it where to post,
-    // what to call itself and which values to start from (data-retry-auto / data-retry-min; without them the dialog's own defaults).
+    // what to call itself and which values to start from (data-retry-auto / data-retry-min / data-retry-visa; without them the dialog's own defaults).
     document.addEventListener('click', (event) => {
         if (!(event.target instanceof Element)) return;
         const dialog = document.getElementById('retry-dialog');
@@ -174,6 +174,7 @@
         dialog.querySelector('[data-retry-go]').textContent = opener.dataset.retryGo ?? 'Retry';
         form.elements['autoSubmit'].checked = (opener.dataset.retryAuto ?? dialog.dataset.defaultAuto) === 'true';
         form.elements['minMatch'].value = opener.dataset.retryMin ?? dialog.dataset.defaultMin;
+        form.elements['requireVisaOrRelocation'].checked = (opener.dataset.retryVisa ?? dialog.dataset.defaultVisa) === 'true';
         dialog.showModal();
     });
 
@@ -224,7 +225,7 @@
         box.hidden = false;
     }
 
-    // ---------- AI provider status (Claude Code or Gemini CLI) ----------
+    // ---------- AI provider status (Claude Code or GitHub Copilot CLI) ----------
     // Both providers answer with { cliFound, loggedIn, detail, plan }, so one routine serves the header pill and both account cards.
     async function fetchStatus(url, force) {
         try {
@@ -269,12 +270,10 @@
             else if (s.loggedIn) { text.textContent = 'Signed in' + (s.detail ? ' as ' + s.detail : '') + (s.plan ? ' - ' + s.plan + ' plan' : ''); stopWaiting(); }
             else if (!waiting) text.textContent = 'Not signed in.';
             signIn.disabled = !s.cliFound || s.loggedIn;
-            // Gemini says where the sign-in comes from; only a Google login can be "signed out" (a key has its own Remove button).
-            signOut.disabled = s.source !== undefined ? s.source !== 'google' : !s.loggedIn;
+            // Copilot says where the sign-in comes from; only a login made with the CLI can be signed out from here (a token variable is the user's own).
+            signOut.disabled = s.source !== undefined ? s.source !== 'stored' : !s.loggedIn;
             const install = document.getElementById(prefix + '-install');
             if (install) install.hidden = s.cliFound;
-            const removeKey = document.getElementById(prefix + '-key-remove');
-            if (removeKey) removeKey.disabled = s.source !== 'api-key-file';
             refreshPill(force);
         }
         account.addEventListener('account-refresh', () => refresh(true));
@@ -288,8 +287,8 @@
         signIn.addEventListener('click', async () => {
             const result = await post(account.dataset.signinUrl);
             if (!result.ok) { text.textContent = result.error; return; }
-            text.textContent = account.dataset.provider === 'Gemini'
-                ? "In the window that just opened, press Enter on 'Login with Google', then choose your account in the browser. This page updates by itself."
+            text.textContent = account.dataset.provider === 'GitHub Copilot'
+                ? 'In the window that just opened, sign in with GitHub in the browser (or enter the code it shows at github.com/login/device). This page updates by itself.'
                 : 'Finish signing in in the browser and the console window that just opened...';
             waiting = setInterval(() => refresh(true), 3000);
             setTimeout(stopWaiting, 10 * 60 * 1000);
@@ -302,18 +301,18 @@
         refresh(false);
     }
     setupAccountCard('claude');
-    setupAccountCard('gemini');
+    setupAccountCard('copilot');
 
-    // ---------- Gemini: install the CLI, save / remove an API key ----------
-    (function setupGeminiExtras() {
-        const account = document.getElementById('gemini-account');
+    // ---------- GitHub Copilot: install the CLI ----------
+    (function setupCopilotExtras() {
+        const account = document.getElementById('copilot-account');
         if (!account) return;
         const $ = id => document.getElementById(id);
         const refresh = () => account.dispatchEvent(new Event('account-refresh'));
         const post = async (url, body) => (await fetch(url, { method: 'POST', headers: { RequestVerificationToken: csrf }, body })).json();
 
-        $('gemini-install-btn').addEventListener('click', async () => {
-            const button = $('gemini-install-btn'), msg = $('gemini-install-msg');
+        $('copilot-install-btn').addEventListener('click', async () => {
+            const button = $('copilot-install-btn'), msg = $('copilot-install-msg');
             button.disabled = true;
             msg.textContent = 'Opening the install window...';
             try {
@@ -327,30 +326,6 @@
                 if (status && status.cliFound) { clearInterval(timer); msg.textContent = 'Installed.'; refresh(); }
             }, 3000);
             setTimeout(() => { clearInterval(timer); button.disabled = false; }, 10 * 60 * 1000);
-        });
-
-        $('gemini-key-save').addEventListener('click', async () => {
-            const input = $('gemini-key'), msg = $('gemini-key-msg'), button = $('gemini-key-save');
-            const key = input.value.trim();
-            if (!key) { msg.textContent = 'Paste your API key first.'; input.focus(); return; }
-
-            button.disabled = true;
-            msg.textContent = 'Checking the key with Google...';
-            try {
-                const data = new FormData();
-                data.append('key', key);
-                const result = await post(account.dataset.savekeyUrl, data);
-                msg.textContent = result.message;
-                if (result.ok) input.value = '';
-            } catch { msg.textContent = 'Could not reach the app.'; }
-            button.disabled = false;
-            refresh();
-        });
-
-        $('gemini-key-remove').addEventListener('click', async () => {
-            const result = await post(account.dataset.removekeyUrl);
-            $('gemini-key-msg').textContent = result.message || 'The saved key was removed.';
-            refresh();
         });
     })();
 

@@ -25,6 +25,7 @@ public class JobApplierDbContext : DbContext
         configuration.Properties<JobStatus>().HaveConversion<string>().HaveMaxLength(20);
         configuration.Properties<ApplyResultKind>().HaveConversion<string>().HaveMaxLength(20);
         configuration.Properties<HelpKind>().HaveConversion<string>().HaveMaxLength(20);
+        configuration.Properties<SupportLevel>().HaveConversion<string>().HaveMaxLength(20);
     }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -39,11 +40,12 @@ public class JobApplierDbContext : DbContext
             job.Property(j => j.OriginalFileName).HasMaxLength(512);
             job.Property(j => j.QueueId).HasMaxLength(64);
 
-            // The two choices of the upload form: plain columns.
+            // The choices of the upload form: plain columns.
             job.ComplexProperty(j => j.Options, options =>
             {
                 options.Property(o => o.AutoSubmit).HasColumnName("AutoSubmit");
                 options.Property(o => o.MinMatchPercent).HasColumnName("MinMatchPercent");
+                options.Property(o => o.RequireVisaOrRelocation).HasColumnName("RequireVisaOrRelocation");
             });
 
             // What each stage produced: one JSON document each, null until the stage has run.

@@ -35,7 +35,7 @@ public class JobsController : Controller
     /// split into one job per posting once it has been read (see <c>ExtractExecutor</c>), so the number of jobs grows as they start.
     /// </summary>
     [HttpPost]
-    public async Task<IActionResult> Upload(List<IFormFile> screenshots, bool autoSubmit, int minMatch, CancellationToken cancellationToken)
+    public async Task<IActionResult> Upload(List<IFormFile> screenshots, bool autoSubmit, int minMatch, bool requireVisaOrRelocation, CancellationToken cancellationToken)
     {
         var profile = _profile.Current;
         if (!_profile.HasResume || string.IsNullOrWhiteSpace(profile.ResumeText) || string.IsNullOrWhiteSpace(profile.Email))
@@ -56,7 +56,7 @@ public class JobsController : Controller
             return RedirectToAction("Index", "Home");
         }
 
-        var options = new JobOptions { AutoSubmit = autoSubmit, MinMatchPercent = Math.Clamp(minMatch, 0, 100) };
+        var options = new JobOptions { AutoSubmit = autoSubmit, MinMatchPercent = Math.Clamp(minMatch, 0, 100), RequireVisaOrRelocation = requireVisaOrRelocation };
         var started = 0;
         var rejected = new List<string>();
 
@@ -71,7 +71,14 @@ public class JobsController : Controller
             var extension = ImageSniffer.Detect(header.AsSpan(0, read));
             if (extension == null) { rejected.Add($"{name} (not a PNG, JPG, GIF or WebP image)"); continue; }
 
-            var job = new JobRecord { Options = new JobOptions { AutoSubmit = options.AutoSubmit, MinMatchPercent = options.MinMatchPercent }, OriginalFileName = name };
+            var job = new JobRecord
+            {
+                Options = new JobOptions
+                {
+                    AutoSubmit = options.AutoSubmit, MinMatchPercent = options.MinMatchPercent, RequireVisaOrRelocation = options.RequireVisaOrRelocation
+                },
+                OriginalFileName = name
+            };
             job.ScreenshotFile = "screenshot" + extension;
             Directory.CreateDirectory(_paths.JobFolder(job.Id));
             await using (var target = System.IO.File.Create(Path.Combine(_paths.JobFolder(job.Id), job.ScreenshotFile)))
@@ -137,21 +144,22 @@ public class JobsController : Controller
     }
 
     /// <summary>
-    /// Retries a job. <paramref name="optionsChosen"/> says the retry dialog was used: its <paramref name="autoSubmit"/> checkbox and
-    /// <paramref name="minMatch"/> (0-100) then replace the job's own settings. Without it the job keeps what it had.
+    /// Retries a job. <paramref name="optionsChosen"/> says the retry dialog was used: its <paramref name="autoSubmit"/> checkbox,
+    /// <paramref name="minMatch"/> (0-100) and <paramref name="requireVisaOrRelocation"/> checkbox then replace the job's own settings.
+    /// Without it the job keeps what it had.
     /// </summary>
     [HttpPost]
-    public IActionResult Retry(Guid id, bool applyAnyway, bool optionsChosen = false, bool autoSubmit = false, int? minMatch = null)
+    public IActionResult Retry(Guid id, bool applyAnyway, bool optionsChosen = false, bool autoSubmit = false, int? minMatch = null, bool requireVisaOrRelocation = false)
     {
-        if (!_runner.Retry(id, applyAnyway, options: RetryOptions.From(optionsChosen, autoSubmit, minMatch))) TempData["Error"] = "That job cannot be retried right now.";
+        if (!_runner.Retry(id, applyAnyway, options: RetryOptions.From(optionsChosen, autoSubmit, minMatch, requireVisaOrRelocation))) TempData["Error"] = "That job cannot be retried right now.";
         return IsFetch() ? Ok() : RedirectToAction(nameof(Details), new { id });
     }
 
     /// <summary>For a job that stopped on a usage limit: retry by itself once the limit has reset.</summary>
     [HttpPost]
-    public IActionResult RetryWhenAvailable(Guid id, bool optionsChosen = false, bool autoSubmit = false, int? minMatch = null)
+    public IActionResult RetryWhenAvailable(Guid id, bool optionsChosen = false, bool autoSubmit = false, int? minMatch = null, bool requireVisaOrRelocation = false)
     {
-        var options = RetryOptions.From(optionsChosen, autoSubmit, minMatch);
+        var options = RetryOptions.From(optionsChosen, autoSubmit, minMatch, requireVisaOrRelocation);
         if (_runner.ArmAutoRetry(id, options))
             TempData["Message"] = "OK. This job will be retried automatically once the usage limit has reset" + (options == null ? "." : " (" + options.Describe() + ").");
         else TempData["Error"] = "That job is not waiting on a usage limit.";
@@ -168,9 +176,9 @@ public class JobsController : Controller
 
     /// <summary>The dashboard button: retry every failed job now.</summary>
     [HttpPost]
-    public IActionResult RetryAllFailed(bool optionsChosen = false, bool autoSubmit = false, int? minMatch = null)
+    public IActionResult RetryAllFailed(bool optionsChosen = false, bool autoSubmit = false, int? minMatch = null, bool requireVisaOrRelocation = false)
     {
-        var options = RetryOptions.From(optionsChosen, autoSubmit, minMatch);
+        var options = RetryOptions.From(optionsChosen, autoSubmit, minMatch, requireVisaOrRelocation);
         var queued = _runner.RetryAllFailed(options);
         TempData["Message"] = queued == 0
             ? "There were no failed jobs to retry."
@@ -181,9 +189,9 @@ public class JobsController : Controller
 
     /// <summary>The dashboard button: every job that stopped on a usage limit will retry by itself once it has reset.</summary>
     [HttpPost]
-    public IActionResult RetryAllWhenAvailable(bool optionsChosen = false, bool autoSubmit = false, int? minMatch = null)
+    public IActionResult RetryAllWhenAvailable(bool optionsChosen = false, bool autoSubmit = false, int? minMatch = null, bool requireVisaOrRelocation = false)
     {
-        var options = RetryOptions.From(optionsChosen, autoSubmit, minMatch);
+        var options = RetryOptions.From(optionsChosen, autoSubmit, minMatch, requireVisaOrRelocation);
         var armed = _runner.ArmAllLimited(options);
         TempData["Message"] = armed == 0
             ? "No jobs are waiting on a usage limit."
@@ -239,7 +247,10 @@ public class JobsController : Controller
             OriginalFileName = r.OriginalFileName,
             Status = r.Status,
             StatusDetail = r.StatusDetail,
-            Options = new JobOptions { AutoSubmit = r.Options.AutoSubmit, MinMatchPercent = r.Options.MinMatchPercent },
+            Options = new JobOptions
+            {
+                AutoSubmit = r.Options.AutoSubmit, MinMatchPercent = r.Options.MinMatchPercent, RequireVisaOrRelocation = r.Options.RequireVisaOrRelocation
+            },
             Extracted = r.Extracted,
             Found = r.Found,
             Match = r.Match,

@@ -52,7 +52,7 @@ public class InsightsController : Controller
         return Json(new { ok = started, message });
     }
 
-    /// <summary>The coach card's data. The AI that answers is the one selected in Settings (Claude or Gemini), so the page names it.</summary>
+    /// <summary>The coach card's data. The AI that answers is the one selected in Settings (Claude or GitHub Copilot), so the page names it.</summary>
     private CoachViewModel Coach(int threshold) =>
         new(_coach.Status(threshold), threshold, HasResume, AiProvider.Label(_settings.Current.Provider));
 

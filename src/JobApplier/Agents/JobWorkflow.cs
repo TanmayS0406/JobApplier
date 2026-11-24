@@ -30,7 +30,7 @@ public sealed record PipelineServices(
 /// <summary>
 /// The per-job pipeline as a Microsoft Agent Framework workflow:
 /// <c>Extract (screenshot) -> Find (real posting) -> Match (score) -> Apply (fill the form)</c>.
-/// Each stage is an executor that runs a CLI-backed agent (Claude Code or Gemini, as selected in Settings); conditional edges stop the pipeline when a stage decides the job
+/// Each stage is an executor that runs a CLI-backed agent (Claude Code or GitHub Copilot, as selected in Settings); conditional edges stop the pipeline when a stage decides the job
 /// should not continue (posting not found, match below the user's minimum, failure).
 /// Stages are resumable: finished work is stored on the job, so a retry continues where it stopped.
 /// </summary>
@@ -213,7 +213,7 @@ internal sealed class ExtractExecutor : StageExecutor
     /// </summary>
     internal void SplitOff(Guid parentId, IReadOnlyList<ExtractedJob> others, int total)
     {
-        var parent = Store.Read(parentId, r => (r.ScreenshotFile, r.OriginalFileName, r.Options.AutoSubmit, r.Options.MinMatchPercent));
+        var parent = Store.Read(parentId, r => (r.ScreenshotFile, r.OriginalFileName, r.Options.AutoSubmit, r.Options.MinMatchPercent, r.Options.RequireVisaOrRelocation));
         var source = Path.Combine(Services.Paths.JobFolder(parentId), parent.ScreenshotFile);
 
         foreach (var other in others)
@@ -224,7 +224,10 @@ internal sealed class ExtractExecutor : StageExecutor
                 {
                     OriginalFileName = parent.OriginalFileName,
                     ScreenshotFile = parent.ScreenshotFile,
-                    Options = new JobOptions { AutoSubmit = parent.AutoSubmit, MinMatchPercent = parent.MinMatchPercent },
+                    Options = new JobOptions
+                    {
+                        AutoSubmit = parent.AutoSubmit, MinMatchPercent = parent.MinMatchPercent, RequireVisaOrRelocation = parent.RequireVisaOrRelocation
+                    },
                     Extracted = other
                 };
                 child.Log.Add(new LogEntry { Kind = "info", Text = $"One of {total} jobs listed in {parent.OriginalFileName}: {Describe(other)}" });
@@ -274,7 +277,7 @@ internal sealed class FindExecutor : StageExecutor
         Uri.TryCreate(url, UriKind.Absolute, out var uri) && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps);
 }
 
-/// <summary>Stage 3: score the job against the resume and apply the user's minimum.</summary>
+/// <summary>Stage 3: score the job against the resume, then apply the user's minimum match and, when asked, the visa / relocation requirement.</summary>
 internal sealed class MatchExecutor : StageExecutor
 {
     public MatchExecutor(PipelineServices services) : base("match", services) { }
@@ -288,7 +291,10 @@ internal sealed class MatchExecutor : StageExecutor
             return false;
         }
 
-        if (Store.Read(jobId, r => r.Match) == null)
+        // A score saved before the matcher was asked about visa sponsorship and relocation has no answer to go by (which is not the same as
+        // "the posting says nothing"), so a job that now needs one is scored again. Without the requirement the saved score is kept.
+        var needsSupportAnswer = Store.Read(jobId, r => r.Options.RequireVisaOrRelocation && r.Match is { SupportAssessed: false });
+        if (Store.Read(jobId, r => r.Match) == null || needsSupportAnswer)
         {
             Store.SetStatus(jobId, JobStatus.Matching, "Comparing the job with your resume");
             var (title, company, description) = Store.Read(jobId, r =>
@@ -302,11 +308,14 @@ internal sealed class MatchExecutor : StageExecutor
 
             var agent = Services.Agents.CreateForJob(jobId, "matcher", Prompts.MatchInstructions, AgentCapabilities.None);
             var match = await RunTypedAsync<MatchResult>(agent, Prompts.MatchPrompt(profile, title, company, description), cancellationToken);
+            match.SupportAssessed = true;
             Store.Update(jobId, r => r.Match = match);
             Store.Log(jobId, "info", $"Match with your resume: {match.Percent}%. {match.Summary}");
+            Store.Log(jobId, "info", "Visa sponsorship: " + Describe(match.VisaSponsorship) + "; relocation help: " + Describe(match.Relocation) +
+                                     (match.SupportEvidence.Length > 0 ? $". The posting says: \"{Clip(match.SupportEvidence, 240)}\"" : "."));
         }
 
-        var state = Store.Read(jobId, r => (r.Match!.Percent, r.Found!.Found, r.Options.MinMatchPercent))!;
+        var state = Store.Read(jobId, r => (r.Match!.Percent, r.Found!.Found, r.Options.MinMatchPercent, r.Options.RequireVisaOrRelocation, r.Match.OffersVisaOrRelocation))!;
         if (!state.Found)
         {
             Store.SetStatus(jobId, JobStatus.NotFound,
@@ -319,8 +328,24 @@ internal sealed class MatchExecutor : StageExecutor
             Store.Log(jobId, "info", $"Skipped: {state.Percent}% < {state.MinMatchPercent}%.");
             return false;
         }
+        if (state.RequireVisaOrRelocation && !state.OffersVisaOrRelocation)
+        {
+            var reason = Store.Read(jobId, r => r.Match!.DescribeMissingSupport())!;
+            Store.SetStatus(jobId, JobStatus.Skipped, reason + " Nothing was applied; use Apply anyway to go on regardless.");
+            Store.Log(jobId, "info", "Skipped: no visa sponsorship or relocation help offered.");
+            return false;
+        }
         return true;
     }
+
+    private static string Describe(SupportLevel level) => level switch
+    {
+        SupportLevel.Offered => "offered",
+        SupportLevel.NotOffered => "not offered",
+        _ => "not mentioned"
+    };
+
+    private static string Clip(string text, int max) => text.Length <= max ? text : text[..max] + "...";
 }
 
 /// <summary>Stage 4: create an account if needed and fill (and, if allowed, submit) the application.</summary>

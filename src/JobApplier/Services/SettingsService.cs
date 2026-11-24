@@ -37,8 +37,8 @@ public sealed class SettingsService
 
         if (settings.ClaudePath.Length > 0 && !File.Exists(settings.ClaudePath))
             return "The Claude CLI path does not exist.";
-        if (settings.GeminiPath.Length > 0 && !File.Exists(settings.GeminiPath))
-            return "The Gemini CLI path does not exist.";
+        if (settings.CopilotPath.Length > 0 && !File.Exists(settings.CopilotPath))
+            return "The GitHub Copilot CLI path does not exist.";
 
         if (settings.AccountsDocumentPath.Length > 0)
         {
@@ -60,8 +60,8 @@ public sealed class SettingsService
     private static AppSettings Normalize(AppSettings s)
     {
         s.Provider = AiProvider.Normalize(s.Provider);
-        s.GeminiPath = (s.GeminiPath ?? "").Trim().Trim('"');
-        s.GeminiModel = (s.GeminiModel ?? "").Trim();
+        s.CopilotPath = (s.CopilotPath ?? "").Trim().Trim('"');
+        s.CopilotModel = (s.CopilotModel ?? "").Trim();
         s.ClaudePath = (s.ClaudePath ?? "").Trim().Trim('"');
         s.Model = (s.Model ?? "").Trim();
         var effort = (s.Effort ?? "").Trim().ToLowerInvariant();

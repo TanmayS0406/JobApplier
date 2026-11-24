@@ -4,7 +4,8 @@
     It is placed OUTSIDE the lists that refresh themselves every few seconds, so a refresh cannot close it while someone is choosing.
     The button that opens it (data-retry-open) says where the form posts and fills in the title and the starting values.
 *@
-<dialog id="retry-dialog" class="retry-dialog" data-default-auto="@Model.DefaultAutoSubmit.ToString().ToLowerInvariant()" data-default-min="@Model.DefaultMinMatch">
+<dialog id="retry-dialog" class="retry-dialog" data-default-auto="@Model.DefaultAutoSubmit.ToString().ToLowerInvariant()" data-default-min="@Model.DefaultMinMatch"
+        data-default-visa="@Model.DefaultRequireVisaOrRelocation.ToString().ToLowerInvariant()">
     <form method="post" data-busy="Retrying...">
         @Html.AntiForgeryToken()
         <input type="hidden" name="optionsChosen" value="true" />
@@ -24,6 +25,13 @@
             <input type="number" name="minMatch" min="0" max="100" />
             %
             <small>0 = apply to everything. A job that already has a match score is judged by this minimum, not the one it had before.</small>
+        </label>
+        <label class="check">
+            <input type="checkbox" name="requireVisaOrRelocation" value="true" />
+            <span>
+                <strong>Only apply if the job offers visa sponsorship or relocation</strong>
+                <small>The posting must say so; otherwise the job is skipped. A job scored before this option existed is scored again to find out.</small>
+            </span>
         </label>
         </div>
 

@@ -1,7 +1,7 @@
 @inject Microsoft.AspNetCore.Antiforgery.IAntiforgery Antiforgery
 @inject JobApplier.Services.SettingsService AppSettingsService
 @{
-    var useGemini = JobApplier.Domain.AiProvider.Normalize(AppSettingsService.Current.Provider) == JobApplier.Domain.AiProvider.Gemini;
+    var useCopilot = JobApplier.Domain.AiProvider.Normalize(AppSettingsService.Current.Provider) == JobApplier.Domain.AiProvider.Copilot;
     var controller = (string?)ViewContext.RouteData.Values["controller"];
     string Active(string name) => string.Equals(controller, name, StringComparison.OrdinalIgnoreCase) ? "active" : "";
     var csrf = Antiforgery.GetAndStoreTokens(Context).RequestToken;
@@ -26,12 +26,12 @@
             <a href="/hangfire" target="_blank" rel="noopener" title="What is waiting, running, or scheduled for after a usage limit (Hangfire dashboard)">Queue</a>
         </nav>
         <span class="pills">
-            <a class="pill pill-unknown @(useGemini ? "" : "pill-active")" asp-controller="Settings" asp-action="Index" data-provider-pill
-               data-status-url="@Url.Action("ClaudeStatus", "Settings")" data-provider="Claude" data-active="@(!useGemini ? "true" : "false")"
-               title="@(useGemini ? "Claude: not used for jobs (change the AI in Settings). Used for Gmail replies." : "Claude is the AI that runs your jobs.")">Claude: checking...</a>
-            <a class="pill pill-unknown @(useGemini ? "pill-active" : "")" asp-controller="Settings" asp-action="Index" data-provider-pill
-               data-status-url="@Url.Action("GeminiStatus", "Settings")" data-provider="Gemini" data-active="@(useGemini ? "true" : "false")"
-               title="@(useGemini ? "Gemini is the AI that runs your jobs." : "Gemini: not used for jobs (change the AI in Settings).")">Gemini: checking...</a>
+            <a class="pill pill-unknown @(useCopilot ? "" : "pill-active")" asp-controller="Settings" asp-action="Index" data-provider-pill
+               data-status-url="@Url.Action("ClaudeStatus", "Settings")" data-provider="Claude" data-active="@(!useCopilot ? "true" : "false")"
+               title="@(useCopilot ? "Claude: not used for jobs (change the AI in Settings). Used for Gmail replies." : "Claude is the AI that runs your jobs.")">Claude: checking...</a>
+            <a class="pill pill-unknown @(useCopilot ? "pill-active" : "")" asp-controller="Settings" asp-action="Index" data-provider-pill
+               data-status-url="@Url.Action("CopilotStatus", "Settings")" data-provider="Copilot" data-active="@(useCopilot ? "true" : "false")"
+               title="@(useCopilot ? "GitHub Copilot is the AI that runs your jobs." : "GitHub Copilot: not used for jobs (change the AI in Settings).")">Copilot: checking...</a>
         </span>
     </header>
 

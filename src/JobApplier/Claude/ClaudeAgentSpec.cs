@@ -62,7 +62,7 @@ public static class AgentErrors
     private static readonly string[] AuthSignals =
     {
         "not logged in", "/login", "api key", "authenticat", "oauth", "unauthorized",
-        "please set an auth method", "gemini_api_key", "failed to login", "login with google", "not signed in"
+        "failed to login", "not signed in", "credential authority", "access denied by policy", "copilot requests"
     };
 
     /// <param name="signInHint">What to tell the user to do when the problem is sign-in, e.g. "Open Settings and press 'Sign in with Claude'."</param>

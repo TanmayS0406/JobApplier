@@ -58,7 +58,7 @@ public static class Prompts
         How:
         1. Search the web (for example https://duckduckgo.com/?q=... or https://www.bing.com/search?q=...) for the company name plus the job title, location and, if useful, the job id. Prefer results on the company's own domain or on an ATS domain; ignore LinkedIn, Indeed, Glassdoor and other aggregators except to learn the apply link they point to.
         2. Open the best candidate. Check that title, company and location match the screenshot. If it is a different role or it is closed, try the next result or the company's careers page. Stop after a reasonable effort (about 8 page visits).
-        3. Read the full description (responsibilities, requirements, benefits) and return it as plain text.
+        3. Read the full description (responsibilities, requirements, benefits) and return it as plain text. If the page says anything about visa sponsorship or relocation help, keep those sentences in the description even when you have to shorten the rest.
         Do NOT click Apply, create accounts or fill anything in during this task.
         If you cannot find the role, return found=false and say why in notes. Write notes in English, whatever language the site uses; the description itself stays in the page's own language.
         """;
@@ -102,6 +102,12 @@ public static class Prompts
         - LogisticsScore: location / work mode / work authorisation / language compatibility; use 70 when unknown (10%).
         Be honest and calibrated: 90+ means an almost perfect fit, 70 a good fit, 50 a stretch, below 30 a poor fit.
         Name the matched and missing skills using the job's own wording. Write the summary in English, even when the job description is in another language.
+
+        Also report what the JOB DESCRIPTION says about two employer benefits. Use the job description only, never the resume, and never guess: a posting that is silent is NotMentioned.
+        - VisaSponsorship. Offered: it clearly says the employer sponsors work visas ("visa sponsorship available", "we sponsor H-1B / Skilled Worker / Blue Card visas", "sponsorship provided"). NotOffered: it says there is no sponsorship, or that applicants must already be allowed to work without sponsorship ("no visa sponsorship", "must be authorised to work in the US without sponsorship"). NotMentioned: it says nothing about visas or sponsorship.
+        - Relocation. Offered: it says the employer helps with the move ("relocation package", "relocation assistance", "relocation allowance / bonus / support"). NotOffered: it says no relocation help is given. NotMentioned: it says nothing about it. A requirement to live in or move to a place ("must be willing to relocate", "relocation required", "on-site in Berlin") is NOT an offer of help, so it does not make this Offered.
+        - SupportEvidence: the one or two sentences that show your two answers, copied as written (leave it empty when the posting says nothing about either).
+        The description may be in another language: read it in that language, and keep SupportEvidence in the original wording.
         """;
 
     public static string MatchPrompt(UserProfile profile, string jobTitle, string company, string jobDescription)

@@ -15,8 +15,9 @@ public static class UsageLimit
 
     private const RegexOptions Ci = RegexOptions.IgnoreCase | RegexOptions.CultureInvariant;
 
-    // Wording used by Claude Code ("5-hour limit reached", "usage limit reached", "weekly limit") and Gemini
-    // ("429 RESOURCE_EXHAUSTED", "exceeded your current quota", "exhausted your capacity").
+    // Wording used by Claude Code ("5-hour limit reached", "usage limit reached", "weekly limit") and GitHub Copilot ("rate limited",
+    // "quota exceeded", "premium requests ... exhausted"). The Copilot CLI also names the kind of error (rate_limit, quota), which the
+    // agent reads directly; these patterns are for the cases where only text is left.
     private static readonly Regex[] Signals =
     {
         new(@"usage limit", Ci),
@@ -27,6 +28,8 @@ public static class UsageLimit
         new(@"too many requests", Ci),
         new(@"resource[\s_]exhausted", Ci),
         new(@"exceeded your (current )?quota|quota (exceeded|exhausted|will reset)|exhausted your (capacity|quota)", Ci),
+        new(@"(premium requests?|ai credits?)[^.\n]{0,80}(exhaust|exceed|used up|run out|ran out|no more|limit)", Ci),
+        new(@"(run out of|out of|used (all|up)|exhausted)[^.\n]{0,40}(premium requests?|ai credits?)", Ci),
     };
 
     private static readonly Regex Http429 = new(@"\b429\b", Ci);

@@ -16,7 +16,7 @@ public sealed class ClaudeAgentSession : AgentSession
 /// A Microsoft Agent Framework <see cref="AIAgent"/> whose model and tool loop is a command-line coding agent signed in with the
 /// user's own account (no API key held by this application). Everything that does not depend on the provider lives here:
 /// sessions, the adapters for <c>RunAsync&lt;T&gt;</c> and streaming, and turning the response format into a JSON schema.
-/// A subclass only knows how to start its CLI and decode its output (<see cref="ClaudeCodeAgent"/>, <see cref="GeminiCliAgent"/>).
+/// A subclass only knows how to start its CLI and decode its output (<see cref="ClaudeCodeAgent"/>, <see cref="CopilotCliAgent"/>).
 /// </summary>
 public abstract class CliAgent : AIAgent
 {

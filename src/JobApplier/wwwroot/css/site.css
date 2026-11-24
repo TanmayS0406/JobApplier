@@ -75,9 +75,8 @@ h3 { font-size: .85rem; margin: 1rem 0 .4rem; text-transform: uppercase; letter-
 .card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 1.1rem 1.3rem; margin-bottom: 1.1rem; }
 .card-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; margin-bottom: .4rem; }
 .head-tools { display: flex; align-items: center; gap: .8rem; flex-wrap: wrap; justify-content: flex-end; }
-#gemini-account .step { border: 1px solid var(--line); border-radius: 8px; padding: .8rem 1rem; margin: .8rem 0; }
-#gemini-account .step p { margin: .3rem 0 .5rem; }
-#gemini-account input[type=password] { min-width: 18rem; }
+#copilot-account .step { border: 1px solid var(--line); border-radius: 8px; padding: .8rem 1rem; margin: .8rem 0; }
+#copilot-account .step p { margin: .3rem 0 .5rem; }
 kbd { font: .85em Consolas, "Cascadia Mono", monospace; padding: 0 .35rem; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; }
 .chip-limit { background: color-mix(in srgb, var(--mid) 20%, var(--panel)); border: 1px solid var(--mid); color: var(--text); }
 .head-tools form { margin: 0; }
