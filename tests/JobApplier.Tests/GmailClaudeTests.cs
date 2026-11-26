@@ -433,6 +433,17 @@ internal sealed class FakeReader : IMailReader
     public TaskCompletionSource? SendGate { get; set; }
     public List<SendRequest> Sends { get; } = new();
 
+    public VerificationFinding Verification { get; set; } = new(false, "", "", "", "");
+    public MailReaderException? VerifyFails { get; set; }
+    public List<VerificationRequest> Verifications { get; } = new();
+
+    public Task<VerificationFinding> FindVerificationAsync(VerificationRequest request, CancellationToken cancellationToken)
+    {
+        Verifications.Add(request);
+        if (VerifyFails != null) throw VerifyFails;
+        return Task.FromResult(Verification);
+    }
+
     public async Task<ReplyDraft> DraftReplyAsync(DraftRequest request, CancellationToken cancellationToken)
     {
         Drafts.Add(request);

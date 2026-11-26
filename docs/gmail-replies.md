@@ -77,3 +77,12 @@ What keeps this safe:
 * A send is not cancelled by closing the page, so it is never left half done.
 * Like everything here, it uses your Claude usage (one short run for the draft, one for the send) and the text goes through Claude
   (Anthropic).
+
+## Verification codes during auto-submit
+
+When a job **submits automatically** and **reply tracking is on**, the job agent can use the tool `read_verification_email` after a site says it e-mailed a code or link. The app (not the agent) has Claude search the mailbox, read-only and as above, for the newest verification mail of the last 30 minutes, and hands back only:
+
+* a **code** (4-12 letters or digits) to type into the page, and/or
+* a **link** that is plain `https`, without credentials in it, to open in the agent's browser.
+
+Nothing else from the mail reaches the agent, a mail from before the sign-up is never used, and a job can ask at most 6 times. The job log says that a code or link was found, never its value. If tracking is off, the job waits for your approval before submitting, the mailbox cannot be read, or nothing arrives, the agent falls back to asking you (`wait_for_user`) as before. Each lookup is one short Claude run (about a minute at most).

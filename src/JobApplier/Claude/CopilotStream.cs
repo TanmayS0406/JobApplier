@@ -159,7 +159,7 @@ public sealed class CopilotStreamParser
 /// </summary>
 public static class CopilotToolNames
 {
-    private static readonly string[] AppTools = { "wait_for_user", "record_account", "report_progress" };
+    private static readonly string[] AppTools = { "wait_for_user", "record_account", "read_verification_email", "report_progress" };
 
     public static (string Name, JsonObject? Input) Normalize(string toolName, string? mcpServer, string? mcpTool, JsonObject? input)
     {

@@ -279,6 +279,23 @@ public sealed class ClaudeMailReader : IMailReader
     /// <summary>How long sending one answer may take.</summary>
     public TimeSpan SendTimeout { get; set; } = TimeSpan.FromMinutes(3);
 
+    /// <summary>
+    /// How long looking for a verification mail may take. The job agent is waiting on it inside one tool call, which the Claude CLI cuts off at
+    /// about 60 seconds, so this stays clearly below that.
+    /// </summary>
+    public TimeSpan VerifyTimeout { get; set; } = TimeSpan.FromSeconds(50);
+
+    /// <summary>Claude searches the mailbox for the verification mail with the read-only tools of a scan. Only a checked code and link come back.</summary>
+    public async Task<VerificationFinding> FindVerificationAsync(VerificationRequest request, CancellationToken cancellationToken)
+    {
+        var status = await GetStatusAsync(false, cancellationToken);
+        if (!status.Ready) throw new MailReaderException(status.Detail, notReady: true);
+
+        var arguments = BuildArguments(VerificationMailPrompt.Schema, status.ReadTools, status.BlockedTools);
+        var result = await RunSessionAsync(arguments, VerificationMailPrompt.Build(request), VerifyTimeout, "Looking for the verification e-mail", null, null, cancellationToken);
+        return VerificationMailPrompt.Parse(result.StructuredJson, result.Text, request.SinceUtc);
+    }
+
     /// <summary>Claude reads the employer's mail with the same read-only tools a scan has, and writes the answer. Nothing is sent or saved in Gmail.</summary>
     public async Task<ReplyDraft> DraftReplyAsync(DraftRequest request, CancellationToken cancellationToken)
     {

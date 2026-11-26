@@ -41,6 +41,7 @@ builder.Services.AddSingleton<IMailReader, ClaudeMailReader>();
 builder.Services.AddSingleton<ReplyStore>();
 builder.Services.AddSingleton<MailChecker>();
 builder.Services.AddSingleton<ReplyComposer>();
+builder.Services.AddSingleton<VerificationMailService>();
 builder.Services.AddHostedService<MailWatcher>();
 
 // The jobs live in SQL Server (EF Core; the schema is migrated every time the app starts, see below) and the queue that runs them is

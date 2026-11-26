@@ -964,7 +964,7 @@ public class JobMcpServerTests
 
         var tools = await server.HandleAsync(id, Rpc("tools/list"), default);
         var names = ((JsonArray)tools!["result"]!["tools"]!).Select(t => (string)t!["name"]!).ToList();
-        Assert.Equal(new[] { "wait_for_user", "record_account", "report_progress" }, names);
+        Assert.Equal(new[] { "wait_for_user", "record_account", "read_verification_email", "report_progress" }, names);
     }
 
     [Fact]

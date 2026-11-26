@@ -18,7 +18,7 @@ public enum AgentCapabilities
     /// <summary>Playwright MCP: a visible browser window owned by this agent.</summary>
     Browser = 2,
 
-    /// <summary>The app's own MCP tools: wait_for_user, record_account, report_progress.</summary>
+    /// <summary>The app's own MCP tools: wait_for_user, record_account, read_verification_email, report_progress.</summary>
     AppTools = 4,
 
     /// <summary>Gives the browser this job's generated password as the JOB_PASSWORD secret.</summary>

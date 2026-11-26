@@ -86,6 +86,9 @@ public interface IMailReader
     /// <summary>Has Claude read one employer's mail and write an answer to it. It only reads; nothing is sent. Throws <see cref="MailReaderException"/> when it cannot.</summary>
     Task<ReplyDraft> DraftReplyAsync(DraftRequest request, CancellationToken cancellationToken);
 
+    /// <summary>Has Claude look for the verification mail a job site just sent, with the read-only tools. Returns only a checked code and/or link. Throws <see cref="MailReaderException"/> when it cannot.</summary>
+    Task<VerificationFinding> FindVerificationAsync(VerificationRequest request, CancellationToken cancellationToken);
+
     /// <summary>
     /// Sends an answer the user has read and approved, as a reply to one message, through the connector's reply tool and nothing else.
     /// Returns only when Gmail confirmed it; throws <see cref="MailReaderException"/> otherwise (its message says whether it may have been sent anyway).

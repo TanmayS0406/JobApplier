@@ -2,14 +2,15 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json.Nodes;
 using JobApplier.Domain;
+using JobApplier.Mail;
 using JobApplier.Services;
 
 namespace JobApplier.Mcp;
 
 /// <summary>
 /// The app's own MCP server (Streamable HTTP, JSON responses). The Claude process of every job connects to
-/// <c>/mcp/{jobId}</c> with a per-run bearer token and gets three tools that only this app can provide:
-/// <c>wait_for_user</c> (hand the browser to the human), <c>record_account</c> and <c>report_progress</c>.
+/// <c>/mcp/{jobId}</c> with a per-run bearer token and gets the tools that only this app can provide:
+/// <c>wait_for_user</c> (hand the browser to the human), <c>record_account</c>, <c>read_verification_email</c> and <c>report_progress</c>.
 /// </summary>
 public sealed class JobMcpServer
 {
@@ -30,9 +31,12 @@ public sealed class JobMcpServer
 
     private readonly TimeSpan _waitSlice;
 
+    private readonly VerificationMailService? _verification;
+
     public JobMcpServer(JobStore store, HumanHelpBroker help, AccountService accounts, ProfileService profile,
-                        SettingsService settings, TimeSpan? waitSlice = null)
+                        SettingsService settings, TimeSpan? waitSlice = null, VerificationMailService? verification = null)
     {
+        _verification = verification;
         _store = store;
         _help = help;
         _accounts = accounts;
@@ -177,6 +181,13 @@ public sealed class JobMcpServer
             },
             required: new[] { "company", "site_url" }),
 
+        Tool("read_verification_email",
+            "Only when the site says it e-mailed a verification code or confirmation link to the user's address (after creating an account or signing in). " +
+            "The app looks in the user's mailbox for that mail and returns just the code and/or link - nothing else from the mail. Wait about 15 seconds after the site sent it before the first call; " +
+            "if it says nothing has arrived, wait about 20 seconds and call again. If it says it cannot be used, fall back to wait_for_user (kind=verification).",
+            new JsonObject { ["site_url"] = new JsonObject { ["type"] = "string", ["description"] = "The address of the site that sent the mail (the page you are on), to recognise it." } },
+            required: Array.Empty<string>()),
+
         Tool("report_progress",
             "Write one short line to the user's activity log, for example 'Found the posting on Greenhouse' or 'Page asks for a cover letter'. Use sparingly.",
             new JsonObject { ["message"] = new JsonObject { ["type"] = "string" } },
@@ -192,6 +203,11 @@ public sealed class JobMcpServer
 
             case "record_account":
                 return RecordAccount(jobId, args);
+
+            case "read_verification_email":
+                return _verification == null
+                    ? "The mailbox cannot be used for this. Call wait_for_user (kind=verification) and tell the user exactly what to do."
+                    : await _verification.LookupAsync(jobId, (string?)args["site_url"], cancellationToken);
 
             case "report_progress":
                 var progress = ((string?)args["message"] ?? "").Trim();

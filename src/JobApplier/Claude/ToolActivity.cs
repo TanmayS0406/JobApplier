@@ -49,6 +49,7 @@ public static class ToolActivity
             {
                 "wait_for_user" => "Asks you: " + Clip((string?)input?["message"], 140),
                 "record_account" => "Saves the new account to the accounts document",
+                "read_verification_email" => "Looks in your mailbox for the verification e-mail (only the code or link is read)",
                 "report_progress" => null, // the message itself is logged by the server
                 _ => tool
             };

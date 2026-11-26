@@ -112,7 +112,7 @@ public sealed class CopilotCliAgent : CliAgent
         sb.AppendLine();
         sb.AppendLine("=== NOTES ABOUT YOUR TOOLS ===");
         sb.AppendLine("- \"The Read tool\" above is your file-viewing tool. Images and documents named in the task are also attached to this request.");
-        sb.AppendLine("- You can use only: file viewing inside the working folder, the browser tools (browser_snapshot, browser_click, ...) and the JobApplier tools (wait_for_user, record_account, report_progress) when the instructions mention them. A tool name may carry its server's name in front (for example playwright-browser_click).");
+        sb.AppendLine("- You can use only: file viewing inside the working folder, the browser tools (browser_snapshot, browser_click, ...) and the JobApplier tools (wait_for_user, record_account, read_verification_email, report_progress) when the instructions mention them. A tool name may carry its server's name in front (for example playwright-browser_click).");
         sb.AppendLine("- Shell commands, file editing, web fetching and web search tools are switched off, and a call to one is refused. Do not try them; use the browser instead.");
         sb.AppendLine();
         sb.AppendLine("=== TASK ===");
