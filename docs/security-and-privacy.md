@@ -23,8 +23,7 @@
 
 ## Things to know
 
-* **E-mail verification:** the job agent cannot read your inbox itself; on a job that submits automatically, with reply tracking on, it can ask the app for the verification mail (see [Gmail replies](gmail-replies.md)) and gets back only a checked code or https link. Otherwise it asks you. (the optional reply tracking is a separate, read-only Claude run that
-  only reports replies, and is not available to the job agent; sending an answer is a further separate run, started only by your click). When a site sends a code or link it asks you to do it in the browser window, then continues.
+* **E-mail verification:** the job agent cannot read your inbox itself. On a job that submits automatically, with reply tracking on, it can ask the app for the verification mail (see [Gmail replies](gmail-replies.md)): a separate read-only Claude run looks for it and the agent gets back only a checked code or an https link. In every other case - the job waits for your approval, tracking is off, nothing arrives - it asks you to do it in the browser window, then continues. Reply tracking and sending an answer stay separate runs that the job agent cannot use.
 * **Not every site works.** Standard forms on Greenhouse, Lever, Ashby, SmartRecruiters and many company sites do; heavily
   customised portals, "Easy Apply inside LinkedIn", or sites that block automation may need your help or fail. A failed job keeps its
   log, so you can see how far it got.
