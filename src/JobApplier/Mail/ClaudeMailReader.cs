@@ -148,13 +148,15 @@ public sealed class ClaudeMailReader : IMailReader
     }
 
     /// <summary>Reads a session's output until it ends: remembers the connector status answers and, for a scan, the result.</summary>
-    private static async Task ReadSessionAsync(System.Diagnostics.Process process, ConnectorWatch watch, Action<ResultEvent>? onResult, CancellationToken cancellationToken)
+    private static async Task ReadSessionAsync(System.Diagnostics.Process process, ConnectorWatch watch, Action<ResultEvent>? onResult, CancellationToken cancellationToken,
+                                               Action<string>? onLine = null)
     {
         try
         {
             string? line;
             while ((line = await process.StandardOutput.ReadLineAsync(cancellationToken)) != null)
             {
+                onLine?.Invoke(line);
                 if (ParseMcpStatus(line) is { } connectors) watch.Latest = connectors;
                 foreach (var evt in ClaudeStreamParser.Parse(line))
                     if (evt is ResultEvent result) onResult?.Invoke(result);
@@ -265,14 +267,138 @@ public sealed class ClaudeMailReader : IMailReader
         var status = await GetStatusAsync(false, cancellationToken);
         if (!status.Ready) throw new MailReaderException(status.Detail, notReady: true);
 
+        var result = await RunSessionAsync(BuildScanArguments(status), MailScanPrompt.Build(request), ScanTimeout, "Reading the mailbox", null, null, cancellationToken);
+        return ParseReplies(result.StructuredJson, result.Text);
+    }
+
+    // ---- writing and sending an answer ----
+
+    /// <summary>How long writing one answer may take.</summary>
+    public TimeSpan DraftTimeout { get; set; } = TimeSpan.FromMinutes(4);
+
+    /// <summary>How long sending one answer may take.</summary>
+    public TimeSpan SendTimeout { get; set; } = TimeSpan.FromMinutes(3);
+
+    /// <summary>Claude reads the employer's mail with the same read-only tools a scan has, and writes the answer. Nothing is sent or saved in Gmail.</summary>
+    public async Task<ReplyDraft> DraftReplyAsync(DraftRequest request, CancellationToken cancellationToken)
+    {
+        var status = await GetStatusAsync(false, cancellationToken);
+        if (!status.Ready) throw new MailReaderException(status.Detail, notReady: true);
+
+        var arguments = BuildArguments(ReplyDraftPrompt.Schema, status.ReadTools, status.BlockedTools);
+        var result = await RunSessionAsync(arguments, ReplyDraftPrompt.Build(request), DraftTimeout, "Writing the answer", null, null, cancellationToken);
+        return ReplyDraftPrompt.Parse(result.StructuredJson, result.Text);
+    }
+
+    /// <summary>
+    /// Sends the answer. This is the one place that gives a session a tool that sends mail, and it gives it that tool alone: no search, no
+    /// read, nothing else. What the run did is taken from the session's own tool call and Gmail's answer to it, not from what Claude says it did.
+    /// </summary>
+    public async Task<SendOutcome> SendReplyAsync(SendRequest request, CancellationToken cancellationToken)
+    {
+        var status = await GetStatusAsync(false, cancellationToken);
+        if (!status.Ready) throw new MailReaderException(status.Detail, notReady: true);
+
+        var tool = GmailToolPolicy.FindReplyTool(status.BlockedTools)
+            ?? throw new MailReaderException("The Gmail connector of your Claude account offers no tool for replying to a message, so nothing was sent. Open the mail in Gmail to answer it there.");
+
+        var everythingElse = status.ReadTools.Concat(status.BlockedTools).Where(t => t != tool).ToList();
+        var arguments = BuildArguments(ReplySendPrompt.Schema, new[] { tool }, everythingElse);
+        var watch = new SendWatch(tool);
+
+        MailReaderException? failure = null;
+        try
+        {
+            await RunSessionAsync(arguments, ReplySendPrompt.Build(request, tool), SendTimeout, "Sending the answer",
+                session => session.BlockedTools.Contains(tool) ? null : "Claude's session did not have the Gmail reply tool.", watch.OnLine, cancellationToken);
+        }
+        catch (MailReaderException ex)
+        {
+            failure = ex;   // judged below: if Gmail already confirmed the reply, how the run ended does not matter
+        }
+
+        if (watch.Delivered) return new SendOutcome("Gmail accepted the answer.", watch.Compare(request));
+        if (watch.Called && !watch.Answered)
+            throw new MailReaderException("Claude asked Gmail to send the answer but never heard back, so it may or may not have been sent. Look in the Sent folder of your Gmail before trying again.");
+        if (watch.Called) throw new MailReaderException("Gmail did not accept the answer: " + watch.ErrorText);
+        throw failure ?? new MailReaderException("Claude did not use the reply tool, so nothing was sent. Try again.");
+    }
+
+    /// <summary>
+    /// Follows the session's own stream for the reply tool: the call Claude made (and with which arguments) and Gmail's answer to it.
+    /// A claim in Claude's final text counts for nothing; only a tool result that is not an error counts as sent.
+    /// </summary>
+    internal sealed class SendWatch
+    {
+        private readonly string _tool;
+        private string? _callId;
+        private JsonObject? _input;
+        private bool? _isError;
+        private string _answer = "";
+
+        public SendWatch(string tool) => _tool = tool;
+
+        public bool Called => _callId != null;
+        public bool Answered => _isError != null;
+        public bool Delivered => Answered && _isError == false;
+        public string ErrorText => string.IsNullOrWhiteSpace(_answer) ? "no reason was given." : MailScanPrompt.Clean(_answer, 200);
+
+        public void OnLine(string line)
+        {
+            if (!line.Contains("tool_use", StringComparison.Ordinal) && !line.Contains("tool_result", StringComparison.Ordinal)) return;
+            JsonNode? node;
+            try { node = JsonNode.Parse(line); }
+            catch (JsonException) { return; }
+
+            if (node?["message"]?["content"] is not JsonArray content) return;
+            foreach (var block in content.OfType<JsonObject>())
+            {
+                var type = block["type"]?.ToString();
+                if (type == "tool_use" && block["name"]?.ToString() == _tool && _callId == null)
+                {
+                    _callId = block["id"]?.ToString() ?? "";
+                    _input = block["input"] as JsonObject;
+                }
+                else if (type == "tool_result" && _callId != null && (block["tool_use_id"]?.ToString() ?? "") == _callId && _isError == null)
+                {
+                    _isError = block["is_error"]?.GetValue<bool>() ?? false;
+                    _answer = block["content"] is JsonArray parts
+                        ? string.Join(' ', parts.OfType<JsonObject>().Select(p => p["text"]?.ToString()))
+                        : block["content"]?.ToString() ?? "";
+                }
+            }
+        }
+
+        /// <summary>Whether Claude passed exactly what was asked for; null when it did. The answer is sent by then, so this can only be reported.</summary>
+        public string? Compare(SendRequest request)
+        {
+            if (_input == null) return null;
+            var problems = new List<string>();
+            if (_input["messageId"]?.ToString() != request.MessageId) problems.Add("it answered a different message");
+            if (ReplyText.Normalize(_input["body"]?.ToString()) != ReplyText.Normalize(request.Body)) problems.Add("the text was changed");
+            var extra = _input.Select(p => p.Key).Where(k => k is not ("messageId" or "body")).ToList();
+            if (extra.Count > 0) problems.Add("it also set " + string.Join(", ", extra));
+            return problems.Count == 0 ? null : "Claude did not pass the answer on exactly as written: " + string.Join("; ", problems) + ". Check the Sent folder of your Gmail.";
+        }
+    }
+
+    /// <summary>
+    /// Runs one headless Claude session and returns its result. The prompt is sent only once the Gmail connector has loaded (a prompt sent
+    /// earlier is answered with no Gmail tools at all); if it never does, nothing is sent and a <see cref="MailReaderException"/> says why.
+    /// </summary>
+    /// <param name="sessionProblem">Whether this session has what the job needs, beyond a working Gmail connector: null when it does, else what is missing.</param>
+    /// <param name="onLine">Sees every line of the session's output as it arrives.</param>
+    private async Task<ResultEvent> RunSessionAsync(List<string> arguments, string prompt, TimeSpan limit, string doing,
+                                                    Func<GmailConnectorStatus, string?>? sessionProblem, Action<string>? onLine, CancellationToken cancellationToken)
+    {
         var cli = ClaudeCli.Locate(_settings.Current.ClaudePath)
             ?? throw new MailReaderException("Claude Code CLI not found.", notReady: true);
 
         Directory.CreateDirectory(_paths.MailWorkspace);
-        var info = ClaudeCli.CreateStartInfo(cli, BuildScanArguments(status), _paths.MailWorkspace);
+        var info = ClaudeCli.CreateStartInfo(cli, arguments, _paths.MailWorkspace);
         using var process = ClaudeCli.Start(info);
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeout.CancelAfter(ScanTimeout);
+        timeout.CancelAfter(limit);
         using var kill = timeout.Token.Register(() => ClaudeCli.KillTree(process));
 
         ResultEvent? result = null;
@@ -282,22 +408,23 @@ public sealed class ClaudeMailReader : IMailReader
         {
             stderrTask = process.StandardError.ReadToEndAsync(CancellationToken.None);
             var watch = new ConnectorWatch();
-            var reader = ReadSessionAsync(process, watch, r => result = r, timeout.Token);
+            var reader = ReadSessionAsync(process, watch, r => result = r, timeout.Token, onLine);
             var stdin = new StreamWriter(process.StandardInput.BaseStream, new UTF8Encoding(false)) { AutoFlush = true };
 
             // Claude connects the account's connectors a few seconds after it starts, and a prompt sent before that is answered with no
             // Gmail tools at all ("nothing found"). So the prompt goes in only once Gmail is connected; if it is not, nothing is sent.
             var connectors = await AwaitConnectorsAsync(stdin, watch, reader, timeout.Token);
             var ready = connectors == null ? null : Evaluate(connectors);
-            if (ready is { Ready: true })
+            var problem = ready is { Ready: true } ? sessionProblem?.Invoke(ready) : null;
+            if (ready is { Ready: true } && problem == null)
             {
-                var message = JsonSerializer.Serialize(new { type = "user", message = new { role = "user", content = MailScanPrompt.Build(request) } });
+                var message = JsonSerializer.Serialize(new { type = "user", message = new { role = "user", content = prompt } });
                 await stdin.WriteLineAsync(message.AsMemory(), timeout.Token);
                 stdin.Close();   // the session ends once it has answered
             }
             else
             {
-                notReady = new MailReaderException(ready?.Detail ?? "Claude Code did not say which connectors it has.", notReady: true);
+                notReady = new MailReaderException(problem ?? ready?.Detail ?? "Claude Code did not say which connectors it has.", notReady: true);
                 ClaudeCli.KillTree(process);
             }
             await reader;
@@ -305,7 +432,7 @@ public sealed class ClaudeMailReader : IMailReader
         }
         catch (OperationCanceledException) when (timeout.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
         {
-            throw new MailReaderException($"Reading the mailbox took longer than {ScanTimeout.TotalMinutes:0} minutes and was stopped. Try again.");
+            throw new MailReaderException($"{doing} took longer than {limit.TotalMinutes:0.#} minutes and was stopped. Try again.");
         }
         finally
         {
@@ -325,35 +452,42 @@ public sealed class ClaudeMailReader : IMailReader
         if (result == null) throw Describe(stderr.Length > 0 ? stderr : $"Claude Code exited with code {process.ExitCode} without a result.");
 
         // Anything Claude tried that was not allowed was refused; only the tool names are logged, never any mail.
-        if (result.Denials.Count > 0) _logger.LogWarning("Claude was refused {Count} tool call(s) while reading the mailbox.", result.Denials.Count);
+        if (result.Denials.Count > 0) _logger.LogWarning("Claude was refused {Count} tool call(s) while {Doing}.", result.Denials.Count, doing.ToLowerInvariant());
 
-        return ParseReplies(result.StructuredJson, result.Text);
+        return result;
     }
 
-    /// <summary>The arguments of a scan. Everything that is not named is denied (<c>dontAsk</c>), and there are no built-in tools at all.</summary>
-    internal List<string> BuildScanArguments(GmailConnectorStatus status)
+    /// <summary>The arguments of a scan: it may search and read mail, and nothing else.</summary>
+    internal List<string> BuildScanArguments(GmailConnectorStatus status) =>
+        BuildArguments(MailScanPrompt.Schema, status.ReadTools, status.BlockedTools);
+
+    /// <summary>
+    /// The arguments of any session. Only <paramref name="allowed"/> tools may be used; everything that is not named is denied (<c>dontAsk</c>),
+    /// <paramref name="refused"/> ones are refused by name as well, and there are no built-in tools at all.
+    /// </summary>
+    internal List<string> BuildArguments(string schema, IReadOnlyList<string> allowed, IReadOnlyList<string> refused)
     {
         var arguments = new List<string>
         {
             "-p",
             "--output-format", "stream-json",
-            "--input-format", "stream-json",             // the prompt is sent once Gmail is connected (see ScanAsync)
+            "--input-format", "stream-json",             // the prompt is sent once Gmail is connected (see RunSessionAsync)
             "--verbose",
             "--permission-mode", "dontAsk",              // never wait for an approval nobody can see: deny instead
             "--disable-slash-commands",
             "--no-session-persistence",
             "--tools", "",                               // no shell, no files, no web: only the connector's tools below
-            "--json-schema", MailScanPrompt.Schema
+            "--json-schema", schema
         };
 
         var model = _settings.Current.MailModel;
         if (!string.IsNullOrWhiteSpace(model)) { arguments.Add("--model"); arguments.Add(model.Trim()); }
 
-        // Explicitly refuse every Gmail tool that is not read-only, even though dontAsk would deny it anyway.
-        if (status.BlockedTools.Count > 0) { arguments.Add("--disallowedTools"); arguments.AddRange(status.BlockedTools); }
+        // Explicitly refuse every Gmail tool that is not allowed, even though dontAsk would deny it anyway.
+        if (refused.Count > 0) { arguments.Add("--disallowedTools"); arguments.AddRange(refused); }
 
         arguments.Add("--allowedTools");   // last: it takes a list
-        arguments.AddRange(status.ReadTools);
+        arguments.AddRange(allowed);
         return arguments;
     }
 

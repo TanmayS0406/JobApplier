@@ -77,6 +77,48 @@ public sealed class EmployerReply
     /// <summary>The phrase that decided the classification, so the result can be checked at a glance.</summary>
     public string Reason { get; set; } = "";
 
+    /// <summary>The answer the user was writing to this mail (Claude's draft, or their own edit of it). Kept so closing the window loses nothing.</summary>
+    public string DraftBody { get; set; } = "";
+
+    public DateTime? DraftSavedUtc { get; set; }
+
+    /// <summary>When an answer was sent from here. Null: none was.</summary>
+    public DateTime? RepliedUtc { get; set; }
+
     [JsonIgnore]
     public string GmailLink => "https://mail.google.com/mail/u/0/#all/" + Uri.EscapeDataString(MessageId);
+
+    /// <summary>The subject an answer to this mail gets (Gmail adds the "Re:" itself; this is what the user is shown).</summary>
+    [JsonIgnore]
+    public string AnswerSubject => Subject.StartsWith("re:", StringComparison.OrdinalIgnoreCase) ? Subject : "Re: " + Subject;
+
+    /// <summary>The address in <see cref="From"/> (<c>Acme Jobs &lt;jobs@acme.example&gt;</c> or a bare address); empty when there is none.</summary>
+    [JsonIgnore]
+    public string FromAddress
+    {
+        get
+        {
+            var match = System.Text.RegularExpressions.Regex.Match(From, @"<\s*([^<>\s]+@[^<>\s]+)\s*>");
+            if (match.Success) return match.Groups[1].Value;
+            var bare = From.Trim();
+            return bare.Contains('@') && !bare.Any(char.IsWhiteSpace) ? bare : "";
+        }
+    }
+
+    /// <summary>Recruiting systems write from addresses nobody reads. An answer to one of them goes nowhere, and the user should know before writing it.</summary>
+    [JsonIgnore]
+    public bool IsNoReply
+    {
+        get
+        {
+            var address = FromAddress;
+            var local = address.Contains('@') ? address[..address.IndexOf('@')] : "";
+            return local.Length > 0 && System.Text.RegularExpressions.Regex.IsMatch(local,
+                @"^(no[-_.]?reply|do[-_.]?not[-_.]?reply|donotreply|mailer[-_.]?daemon|postmaster|bounces?|notifications?)\b",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+        }
+    }
+
+    /// <summary>A copy that can be read without holding the store's lock.</summary>
+    public EmployerReply Copy() => (EmployerReply)MemberwiseClone();
 }

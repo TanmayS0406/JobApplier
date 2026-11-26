@@ -78,7 +78,7 @@
     // A list lives in an area with data-poll-url and data-list-prefix. Its controls carry data-list-param (a select), data-list-page
     // (a page button) or data-list-reset. The state is kept in the poll address of the area (so polling does not jump back to page 1)
     // and mirrored in the page address as {prefix}_page, {prefix}_sort, ... so a reload or a copied link shows the same page.
-    const listKeys = ['page', 'size', 'sort', 'min'];
+    const listKeys = ['page', 'size', 'sort', 'min', 'show'];
 
     function setListParams(area, changes) {
         const poll = new URL(area.dataset.pollUrl, location.origin);
@@ -116,7 +116,7 @@
         if (!pageButton && !reset) return;
         if (pageButton?.disabled) return;
 
-        setListParams(area, pageButton ? { page: pageButton.dataset.listPage } : { min: '', page: '' });
+        setListParams(area, pageButton ? { page: pageButton.dataset.listPage } : { min: '', show: '', page: '' });
         try { await redrawArea(area); } catch { /* the next poll will try again */ }
     });
 
@@ -523,6 +523,167 @@
             await redraw();
         }
     });
+
+    // ---------- Answering an employer: [data-reply-compose] opens the one dialog (outside the card that refreshes itself) ----------
+    // Opening asks the server for a draft (the saved one, or a new one Claude writes after reading the mail). The text is the user's to
+    // change; Send sends exactly what is in the box. Everything that came from a mail is put in with textContent / value, never as markup.
+    (() => {
+        const dialog = document.getElementById('reply-dialog');
+        if (!dialog) return;
+
+        const part = (name) => dialog.querySelector(`[data-compose-${name}]`);
+        const box = part('body'), status = part('status'), note = part('note');
+        const sendButton = part('send'), saveButton = part('save'), againButton = part('again');
+        let mail = null;        // { id, controller } of the mail the dialog is open for
+        let dirty = false;      // the text was changed since it was loaded or saved
+        let working = false;    // Claude is writing the draft
+        let sending = false;    // the answer is being sent. Closing the window does not stop that, so it also blocks opening another one
+
+        const post = (url, id, query, form, signal) => fetch(`${url}/${encodeURIComponent(id)}${query ?? ''}`, {
+            method: 'POST',
+            headers: { RequestVerificationToken: csrf, ...(form ? { 'Content-Type': 'application/x-www-form-urlencoded' } : {}) },
+            body: form ? new URLSearchParams(form) : undefined,
+            signal
+        });
+
+        function controls(enabled) {
+            box.disabled = !enabled;
+            sendButton.disabled = saveButton.disabled = againButton.disabled = !enabled;
+        }
+
+        function say(text, isError) {
+            status.textContent = text;
+            status.classList.toggle('compose-error', !!isError);
+        }
+
+        async function load(startOver) {
+            working = true;
+            controls(false);
+            note.hidden = true;
+            say('Claude is reading the mail and writing an answer. This can take a minute...');
+            const controller = mail.controller = new AbortController();
+            try {
+                const response = await post(dialog.dataset.draftUrl, mail.id, startOver ? '?startOver=true' : '', null, controller.signal);
+                const answer = await response.json();
+                if (!answer.ok) {
+                    say(answer.message, true);
+                    againButton.disabled = false;
+                    return;
+                }
+                box.value = answer.body;
+                dirty = false;
+                say(answer.message);
+                note.textContent = answer.note ?? '';
+                note.hidden = !answer.note;
+                controls(true);
+                box.focus();
+            } catch (error) {
+                if (error.name !== 'AbortError') {
+                    say('The app could not be reached, or it answered with something unexpected. Is it still running?', true);
+                    againButton.disabled = false;
+                }
+            } finally {
+                working = false;
+            }
+        }
+
+        // Keeps the text when it was changed. Returns false only when saving was needed and did not work.
+        async function save() {
+            if (!mail || !dirty) return true;
+            dirty = false;
+            try {
+                const answer = await (await post(dialog.dataset.saveUrl, mail.id, '', { body: box.value })).json();
+                if (answer.ok) return true;
+            } catch { /* not saved */ }
+            dirty = true;
+            return false;
+        }
+
+        function open(button) {
+            if (working || sending) return;
+            mail = { id: button.dataset.replyCompose, controller: null };
+            dirty = false;
+            box.value = '';
+
+            part('title').textContent = `Reply to ${button.dataset.company || 'the employer'}`;
+            part('context').textContent = [button.dataset.to ? `To: ${button.dataset.to}` : '', button.dataset.subject, button.dataset.role].filter(Boolean).join('  ·  ');
+            part('noreply').hidden = button.dataset.noReply !== 'true';
+            const replied = part('replied');
+            replied.hidden = !button.dataset.replied;
+            replied.textContent = button.dataset.replied ? `You already answered this mail from here on ${button.dataset.replied}. This would be another answer.` : '';
+
+            dialog.showModal();
+            load(false);
+        }
+
+        document.addEventListener('click', (event) => {
+            if (!(event.target instanceof Element)) return;
+            const opener = event.target.closest('[data-reply-compose]');
+            if (opener) { open(opener); return; }
+            // the backdrop is the dialog element itself; the body inside has the padding
+            if (event.target === dialog || event.target.closest('[data-compose-close]')) dialog.close();
+        });
+
+        box.addEventListener('input', () => { dirty = true; });
+
+        saveButton.addEventListener('click', async () => {
+            if (await save()) say('Draft saved.');
+            else say('The draft could not be saved. Is the app still running?', true);
+        });
+
+        againButton.addEventListener('click', () => {
+            if (box.value.trim() && dirty && !confirm('Replace what you have written with a new draft from Claude?')) return;
+            load(true);
+        });
+
+        sendButton.addEventListener('click', async () => {
+            if (working || sending || !mail) return;
+            const text = box.value;
+            if (!text.trim()) { say('The answer is empty. Write something first.', true); return; }
+            if (text.includes('[[')) { say('Part of the answer is still marked [[like this]]. Write your own words there first.', true); return; }
+
+            sending = true;
+            controls(false);
+            say('Sending through your Gmail...');
+            let answer = null;
+            try {
+                answer = await (await post(dialog.dataset.sendUrl, mail.id, '', { body: text })).json();
+            } catch { /* reported below */ }
+            sending = false;
+
+            const stillOpen = dialog.open;
+            const replies = document.getElementById('replies');
+            if (replies) { try { await redrawArea(replies); } catch { /* the next poll will redraw it */ } }
+
+            if (!answer) {
+                // Whether it went out is unknown: say so rather than offering a blind retry.
+                const unknown = 'The app did not answer, so it is not known whether this was sent. Look in the Sent folder of your Gmail before sending again.';
+                if (stillOpen) { controls(true); say(unknown, true); } else alert(unknown);
+                return;
+            }
+            if (!answer.ok) {
+                // the window may have been closed while it was being sent: the message must still reach the user
+                if (stillOpen) { controls(true); say(answer.message, true); } else alert(answer.message);
+                return;
+            }
+            dirty = false;
+            if (stillOpen) {
+                say(answer.message);
+                setTimeout(() => { if (dialog.open) dialog.close(); }, 1500);
+            }
+        });
+
+        // however it was closed (Close, backdrop, Esc, or after sending): stop Claude if it is still writing, keep unsent text, refresh the card
+        dialog.addEventListener('close', () => {
+            if (mail?.controller) mail.controller.abort();
+            // not while sending: the server clears the draft once the answer is out, and a late save would bring the sent text back
+            const keep = sending ? Promise.resolve(true) : save();
+            const replies = document.getElementById('replies');
+            keep.finally(() => { if (replies) redrawArea(replies).catch(() => { /* the next poll will redraw it */ }); });
+            mail = null;
+            working = false;
+        });
+    })();
 
     // ---------- Upload: drag & drop, paste, previews ----------
     const dropzone = document.getElementById('dropzone');

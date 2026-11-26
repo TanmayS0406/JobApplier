@@ -17,11 +17,14 @@
 * Gmail (optional) is read by Claude through your Claude account's Gmail connector, with read-only tools only - see [Gmail replies](gmail-replies.md).
   This app holds no Google credential. The mail text is processed by Claude (Anthropic), is never logged, and only a short
   snippet and the verdict of each reply are kept on this PC.
+* The one exception to "read-only" is **answering an employer**: Claude drafts the answer with the same read-only tools, and a mail is sent only
+  when you press **Send** on a text you have read, by a separate run that is given the connector's reply tool and nothing else. Your
+  profile facts (name, contact details, work authorization, salary expectation, saved answers, the start of your resume) go to Claude to write the draft.
 
 ## Things to know
 
 * **E-mail verification:** the job agent cannot read your inbox (the optional reply tracking is a separate, read-only Claude run that
-  only reports replies, and is not available to the job agent). When a site sends a code or link it asks you to do it in the browser window, then continues.
+  only reports replies, and is not available to the job agent; sending an answer is a further separate run, started only by your click). When a site sends a code or link it asks you to do it in the browser window, then continues.
 * **Not every site works.** Standard forms on Greenhouse, Lever, Ashby, SmartRecruiters and many company sites do; heavily
   customised portals, "Easy Apply inside LinkedIn", or sites that block automation may need your help or fail. A failed job keeps its
   log, so you can see how far it got.

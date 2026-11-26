@@ -421,6 +421,33 @@ internal sealed class FakeReader : IMailReader
         ConnectOpened = true;
         return ConnectError;
     }
+
+    // ---- answering ----
+    public ReplyDraft Draft { get; set; } = new("Hello,\n\nThank you for your mail.\n\nKind regards,\nAda", "");
+    public MailReaderException? DraftFails { get; set; }
+    public TaskCompletionSource? DraftGate { get; set; }
+    public List<DraftRequest> Drafts { get; } = new();
+
+    public SendOutcome Outcome { get; set; } = new("Gmail accepted the answer.", null);
+    public MailReaderException? SendFails { get; set; }
+    public TaskCompletionSource? SendGate { get; set; }
+    public List<SendRequest> Sends { get; } = new();
+
+    public async Task<ReplyDraft> DraftReplyAsync(DraftRequest request, CancellationToken cancellationToken)
+    {
+        Drafts.Add(request);
+        if (DraftGate != null) await DraftGate.Task.WaitAsync(cancellationToken);
+        if (DraftFails != null) throw DraftFails;
+        return Draft;
+    }
+
+    public async Task<SendOutcome> SendReplyAsync(SendRequest request, CancellationToken cancellationToken)
+    {
+        Sends.Add(request);
+        if (SendGate != null) await SendGate.Task.WaitAsync(cancellationToken);
+        if (SendFails != null) throw SendFails;
+        return Outcome;
+    }
 }
 
 public class MailCheckerTests
@@ -816,6 +843,13 @@ public class ClaudeMailReaderTests
                     log('scan');
                     if (scenario.hang) { setInterval(() => {}, 1000); return; }
                     init();
+                    // tool calls the model "made": the call, then (unless noResult) the connector's answer, as the real stream shows them
+                    (scenario.toolCalls ?? []).forEach((call, i) => {
+                        const id = 'toolu_' + i;
+                        write({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', id, name: call.name, input: call.input ?? {} }] } });
+                        if (!call.noResult)
+                            write({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, is_error: !!call.isError, content: call.output ?? 'ok' }] } });
+                    });
                     if (scenario.error) { write({ type: 'result', subtype: 'error', is_error: true, result: scenario.error }); process.exit(1); }
                     const result = { type: 'result', subtype: 'success', is_error: false, result: scenario.text ?? '', session_id: 's1',
                         total_cost_usd: 0, usage: { input_tokens: 1, output_tokens: 1 }, permission_denials: scenario.denials ?? [] };
@@ -1207,6 +1241,174 @@ public class ClaudeMailReaderTests
         Assert.Throws<MailReaderException>(() => ClaudeMailReader.ParseReplies("not json", "also { not json }"));
         Assert.Throws<MailReaderException>(() => ClaudeMailReader.ParseReplies(null, null));
     }
+
+    // ---- writing and sending an answer ----
+
+    private const string ReplyTool = "mcp__claude_ai_Gmail__reply";
+    private static readonly string[] GmailWithReply = { Search, GetThread, Draft, ReplyTool, "mcp__claude_ai_Crustdata__crustdata_web_search" };
+
+    private static DraftRequest DraftOf() => new(
+        new EmployerReply { MessageId = "18f", Company = "Acme", Role = "Dev", From = "Anna <anna@acme.example>", Subject = "Next steps", Kind = ReplyKind.MovingForward },
+        new UserProfile { FullName = "Ada Lovelace", Email = "ada@example.com" });
+
+    private static object Called(string name, object input, bool isError = false, string? output = null, bool noResult = false) =>
+        new { name, input, isError, output, noResult };
+
+    /// <summary>The values after a flag, up to the next flag.</summary>
+    private static List<string> After(List<string> args, string flag)
+    {
+        var at = args.IndexOf(flag);
+        Assert.True(at >= 0, flag + " is missing from the arguments");
+        return args.Skip(at + 1).TakeWhile(a => !a.StartsWith("--", StringComparison.Ordinal)).ToList();
+    }
+
+    [Fact]
+    public async Task Writing_an_answer_may_only_read_mail_and_is_never_given_the_reply_tool()
+    {
+        if (!FakeClaude.Available()) return;
+        var (reader, fake, env) = Create(new { servers = ConnectedServers, tools = GmailWithReply, structured = new { body = "Hello Anna,\n\nYes, Tuesday works.\n\nKind regards,\nAda", note = "check the time" } });
+        using var _e = env;
+
+        var draft = await reader.DraftReplyAsync(DraftOf(), CancellationToken.None);
+
+        Assert.Equal("Hello Anna,\n\nYes, Tuesday works.\n\nKind regards,\nAda", draft.Body);
+        Assert.Equal("check the time", draft.Note);
+
+        var run = fake.Calls().Single(c => c.Kind == "scan");
+        Assert.Equal(new[] { Search, GetThread }, After(run.Args, "--allowedTools"));
+        Assert.Contains(ReplyTool, After(run.Args, "--disallowedTools"));   // refused by name as well as by not being allowed
+        Assert.Contains(Draft, After(run.Args, "--disallowedTools"));
+        Assert.Equal("", run.Args[run.Args.IndexOf("--tools") + 1]);
+        Assert.Contains("18f", run.Stdin);                                   // the model is told which message to read
+        Assert.Contains("Ada Lovelace", run.Stdin);
+    }
+
+    [Fact]
+    public async Task Sending_gives_the_session_the_reply_tool_and_nothing_else()
+    {
+        if (!FakeClaude.Available()) return;
+        var (reader, fake, env) = Create(new
+        {
+            servers = ConnectedServers, tools = GmailWithReply,
+            toolCalls = new[] { Called(ReplyTool, new { messageId = "18f", body = "Thank you, Anna.\n\nKind regards,\nAda" }) },
+            structured = new { sent = true, detail = "sent" }
+        });
+        using var _e = env;
+
+        var outcome = await reader.SendReplyAsync(new SendRequest("18f", "Thank you, Anna.\n\nKind regards,\nAda"), CancellationToken.None);
+
+        Assert.Null(outcome.Warning);
+        var run = fake.Calls().Single(c => c.Kind == "scan");
+        Assert.Equal(new[] { ReplyTool }, After(run.Args, "--allowedTools"));   // not even a search or a read
+        var refused = After(run.Args, "--disallowedTools");
+        Assert.Contains(Search, refused);
+        Assert.Contains(GetThread, refused);
+        Assert.Contains(Draft, refused);
+        Assert.DoesNotContain(ReplyTool, refused);
+        Assert.Contains(ReplyTool, run.Stdin);
+        Assert.Contains("\"18f\"", run.Stdin);
+        Assert.Contains("Thank you, Anna.\\n\\nKind regards,\\nAda", run.Stdin);   // the text goes in as a JSON string: exact, line breaks and all
+    }
+
+    [Fact]
+    public async Task What_Claude_says_about_sending_counts_for_nothing_without_the_tool_having_been_called()
+    {
+        if (!FakeClaude.Available()) return;
+        var (reader, _, env) = Create(new { servers = ConnectedServers, tools = GmailWithReply, structured = new { sent = true, detail = "I sent it" } });
+        using var _e = env;
+
+        var ex = await Assert.ThrowsAsync<MailReaderException>(() => reader.SendReplyAsync(new SendRequest("18f", "Hello"), CancellationToken.None));
+
+        Assert.Contains("did not use the reply tool", ex.Message);
+        Assert.Contains("nothing was sent", ex.Message);
+    }
+
+    [Fact]
+    public async Task A_reply_Gmail_refused_is_reported_with_its_reason_and_not_as_sent()
+    {
+        if (!FakeClaude.Available()) return;
+        var (reader, _, env) = Create(new
+        {
+            servers = ConnectedServers, tools = GmailWithReply,
+            toolCalls = new[] { Called(ReplyTool, new { messageId = "18f", body = "Hello" }, isError: true, output: "Daily sending limit exceeded") },
+            structured = new { sent = true, detail = "sent" }   // a model that says so anyway
+        });
+        using var _e = env;
+
+        var ex = await Assert.ThrowsAsync<MailReaderException>(() => reader.SendReplyAsync(new SendRequest("18f", "Hello"), CancellationToken.None));
+
+        Assert.Contains("Gmail did not accept", ex.Message);
+        Assert.Contains("Daily sending limit exceeded", ex.Message);
+    }
+
+    [Fact]
+    public async Task A_send_that_never_got_Gmails_answer_says_it_may_have_gone_out_instead_of_offering_a_blind_retry()
+    {
+        if (!FakeClaude.Available()) return;
+        var (reader, _, env) = Create(new
+        {
+            servers = ConnectedServers, tools = GmailWithReply,
+            toolCalls = new[] { Called(ReplyTool, new { messageId = "18f", body = "Hello" }, noResult: true) },
+            error = "the session fell over"
+        });
+        using var _e = env;
+
+        var ex = await Assert.ThrowsAsync<MailReaderException>(() => reader.SendReplyAsync(new SendRequest("18f", "Hello"), CancellationToken.None));
+
+        Assert.Contains("may or may not have been sent", ex.Message);
+        Assert.Contains("Sent folder", ex.Message);
+    }
+
+    [Fact]
+    public async Task A_reply_Gmail_accepted_stays_sent_even_when_the_run_ended_badly_afterwards()
+    {
+        if (!FakeClaude.Available()) return;
+        var (reader, _, env) = Create(new
+        {
+            servers = ConnectedServers, tools = GmailWithReply,
+            toolCalls = new[] { Called(ReplyTool, new { messageId = "18f", body = "Hello" }) },
+            error = "the session fell over after sending"
+        });
+        using var _e = env;
+
+        var outcome = await reader.SendReplyAsync(new SendRequest("18f", "Hello"), CancellationToken.None);
+
+        Assert.Null(outcome.Warning);   // reported as sent: telling the user to try again would mail the employer twice
+    }
+
+    [Fact]
+    public async Task A_reply_that_was_not_passed_on_exactly_as_approved_is_reported()
+    {
+        if (!FakeClaude.Available()) return;
+        var (reader, _, env) = Create(new
+        {
+            servers = ConnectedServers, tools = GmailWithReply,
+            toolCalls = new[] { Called(ReplyTool, new { messageId = "other", body = "Something else", to = new[] { "x@y.example" } }) },
+            structured = new { sent = true, detail = "sent" }
+        });
+        using var _e = env;
+
+        var outcome = await reader.SendReplyAsync(new SendRequest("18f", "Hello"), CancellationToken.None);
+
+        Assert.NotNull(outcome.Warning);
+        Assert.Contains("different message", outcome.Warning);
+        Assert.Contains("text was changed", outcome.Warning);
+        Assert.Contains("also set to", outcome.Warning);
+        Assert.Contains("Sent folder", outcome.Warning);
+    }
+
+    [Fact]
+    public async Task A_connector_without_a_reply_tool_sends_nothing_and_starts_no_run()
+    {
+        if (!FakeClaude.Available()) return;
+        var (reader, fake, env) = Create(new { servers = ConnectedServers, tools = GmailTools });   // no reply tool among them
+        using var _e = env;
+
+        var ex = await Assert.ThrowsAsync<MailReaderException>(() => reader.SendReplyAsync(new SendRequest("18f", "Hello"), CancellationToken.None));
+
+        Assert.Contains("no tool for replying", ex.Message);
+        Assert.All(fake.Calls(), c => Assert.Equal("probe", c.Kind));   // only the status probe ran; no prompt was ever sent
+    }
 }
 
 public class GmailControllerTests
@@ -1229,7 +1431,8 @@ public class GmailControllerTests
         var store = new ReplyStore(env.Paths);
         var checker = new MailChecker(reader, accounts, store, NullLogger<MailChecker>.Instance);
 
-        var controller = new GmailController(reader, checker, store, accounts, env.NewStore(), settings, new StubLifetime(), NullLogger<GmailController>.Instance)
+        var composer = new ReplyComposer(reader, store, new ProfileService(env.Paths), NullLogger<ReplyComposer>.Instance);
+        var controller = new GmailController(reader, checker, store, accounts, env.NewStore(), settings, composer, new StubLifetime(), NullLogger<GmailController>.Instance)
         {
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() }
         };
@@ -1274,7 +1477,8 @@ public class GmailControllerTests
         var reader = new FakeReader { Gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously) };
         var store = new ReplyStore(env.Paths);
         var checker = new MailChecker(reader, accounts, store, NullLogger<MailChecker>.Instance);
-        var controller = new GmailController(reader, checker, store, accounts, env.NewStore(), settings, new StubLifetime(), NullLogger<GmailController>.Instance)
+        var composer = new ReplyComposer(reader, store, new ProfileService(env.Paths), NullLogger<ReplyComposer>.Instance);
+        var controller = new GmailController(reader, checker, store, accounts, env.NewStore(), settings, composer, new StubLifetime(), NullLogger<GmailController>.Instance)
         {
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() }
         };
@@ -1404,6 +1608,7 @@ public class GmailControllerTests
     [InlineData("/Views/Shared/_Replies.cshtml")]   // rendered by GmailController.Replies (which only searches Views/Gmail and Views/Shared) and by the dashboard
     [InlineData("/Views/Shared/_ListBar.cshtml")]
     [InlineData("/Views/Shared/_RetryDialog.cshtml")]   // the Retry chooser: included by the dashboard and by the job page
+    [InlineData("/Views/Shared/_ReplyDialog.cshtml")]   // the window for answering an employer's mail
     [InlineData("/Views/Jobs/Details.cshtml")]
     [InlineData("/Views/Jobs/_JobBody.cshtml")]
     [InlineData("/Views/Shared/_Pager.cshtml")]

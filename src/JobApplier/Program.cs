@@ -35,10 +35,12 @@ builder.Services.AddSingleton<ClaudeAccountService>();
 builder.Services.AddSingleton<CopilotAccountService>();
 
 // Gmail replies: Claude reads the mailbox through the Gmail connector of the user's own Claude account (read-only tools only),
-// once the user has turned tracking on.
+// once the user has turned tracking on. Answering is separate: Claude writes a draft (read-only again) and a mail is sent only when the
+// user presses Send on a text they have read, by a session that is given the connector's reply tool and nothing else.
 builder.Services.AddSingleton<IMailReader, ClaudeMailReader>();
 builder.Services.AddSingleton<ReplyStore>();
 builder.Services.AddSingleton<MailChecker>();
+builder.Services.AddSingleton<ReplyComposer>();
 builder.Services.AddHostedService<MailWatcher>();
 
 // The jobs live in SQL Server (EF Core; the schema is migrated every time the app starts, see below) and the queue that runs them is

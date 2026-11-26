@@ -1,3 +1,4 @@
+using JobApplier.Domain;
 using JobApplier.Mail;
 using JobApplier.Services;
 
@@ -15,7 +16,8 @@ public static class LiveViewModelBuilder
             .OfType<HelpItem>()
             .ToList();
 
-        var (page, info) = Paging.Slice(Sort(Filter(rows, query.MinMatch), query.Sort), query.Page, query.PageSize);
+        var latestReply = replies?.StatusByJob() ?? new Dictionary<Guid, EmployerReply>();
+        var (page, info) = Paging.Slice(Sort(Filter(rows, query.MinMatch, query.Show, latestReply), query.Sort), query.Page, query.PageSize);
         return new LiveViewModel
         {
             Rows = page,
@@ -25,13 +27,35 @@ public static class LiveViewModelBuilder
             Help = help,
             PausedUntilUtc = pausedUntilUtc,
             RepliesTracked = replies?.State().Enabled ?? false,
-            Replies = replies?.StatusByJob() ?? new Dictionary<Guid, EmployerReply>()
+            Replies = latestReply
         };
     }
 
-    /// <summary>"Match at least 70%": a job that has not been scored yet has no match to compare, so it is left out while a filter is on.</summary>
-    internal static IReadOnlyList<JobRow> Filter(IReadOnlyList<JobRow> rows, int minMatch) =>
-        minMatch <= 0 ? rows : rows.Where(r => r.MatchPercent >= minMatch).ToList();
+    /// <summary>
+    /// "Match at least 70%": a job that has not been scored yet has no match to compare, so it is left out while a filter is on.
+    /// "Show": by what the employer answered (the same latest answer the Employer reply column shows), by no answer yet, or by being skipped.
+    /// </summary>
+    internal static IReadOnlyList<JobRow> Filter(IReadOnlyList<JobRow> rows, int minMatch, string show = "",
+                                                 IReadOnlyDictionary<Guid, EmployerReply>? latestReply = null)
+    {
+        latestReply ??= new Dictionary<Guid, EmployerReply>();
+        IEnumerable<JobRow> kept = rows;
+
+        if (minMatch > 0) kept = kept.Where(r => r.MatchPercent >= minMatch);
+
+        if (show.Length > 0)
+        {
+            kept = show switch
+            {
+                ListQuery.ShowReplied => kept.Where(r => latestReply.ContainsKey(r.Id)),
+                ListQuery.ShowNoReply => kept.Where(r => r.Status == JobStatus.Applied && !latestReply.ContainsKey(r.Id)),
+                ListQuery.ShowSkipped => kept.Where(r => r.Status == JobStatus.Skipped),
+                _ when ListQuery.KindOf(show) is { } kind => kept.Where(r => latestReply.TryGetValue(r.Id, out var reply) && reply.Kind == kind),
+                _ => kept
+            };
+        }
+        return kept as IReadOnlyList<JobRow> ?? kept.ToList();
+    }
 
     /// <summary>Jobs without a match percentage always come last, whichever way the percentage is sorted. Ties keep newest first.</summary>
     internal static IReadOnlyList<JobRow> Sort(IReadOnlyList<JobRow> rows, string sort) => sort switch

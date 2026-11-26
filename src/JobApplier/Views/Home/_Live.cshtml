@@ -12,7 +12,19 @@
         (ListQuery.SortNewest, "Newest first"), (ListQuery.SortMatchHigh, "Match: high to low"),
         (ListQuery.SortMatchLow, "Match: low to high"), (ListQuery.SortCompany, "Company A-Z")
     };
-    var jobBar = new ListBar(Model.Query, Model.Page, jobSorts, "jobs", Model.Counts.Total);
+    // "Show": what the employer answered needs tracking to be on (otherwise there is nothing to filter by); skipped jobs are always known.
+    var jobShows = new List<(string, string)>();
+    if (Model.RepliesTracked || Model.Query.Show is not ("" or ListQuery.ShowSkipped))
+    {
+        jobShows.Add((ListQuery.ShowReplied, "Got a reply"));
+        jobShows.Add((ListQuery.ShowRejected, "Rejected"));
+        jobShows.Add((ListQuery.ShowInfo, "Info requested"));
+        jobShows.Add((ListQuery.ShowMoving, "Moving forward"));
+        jobShows.Add((ListQuery.ShowOffer, "Offer"));
+        jobShows.Add((ListQuery.ShowNoReply, "No reply yet"));
+    }
+    jobShows.Add((ListQuery.ShowSkipped, "Skipped"));
+    var jobBar = new ListBar(Model.Query, Model.Page, jobSorts, "jobs", Model.Counts.Total, jobShows);
 }
 
 @if (Model.PausedUntilUtc is DateTime pausedUntil)

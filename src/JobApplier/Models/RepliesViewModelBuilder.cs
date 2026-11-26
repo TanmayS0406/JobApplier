@@ -17,7 +17,7 @@ public static class RepliesViewModelBuilder
             .Where(j => j.Percent.HasValue)
             .ToDictionary(j => j.Id, j => j.Percent!.Value);
 
-        var (page, info) = Paging.Slice(Sort(Filter(all, matchByJob, query.MinMatch), matchByJob, query.Sort), query.Page, query.PageSize);
+        var (page, info) = Paging.Slice(Sort(Filter(all, matchByJob, query.MinMatch, query.Show), matchByJob, query.Sort), query.Page, query.PageSize);
         return new RepliesViewModel
         {
             Enabled = state.Enabled,
@@ -34,9 +34,17 @@ public static class RepliesViewModelBuilder
         };
     }
 
-    /// <summary>"Match at least 70%": a reply whose job has no match percentage (never scored, or deleted since) is left out while a filter is on.</summary>
-    internal static IReadOnlyList<EmployerReply> Filter(IReadOnlyList<EmployerReply> replies, IReadOnlyDictionary<Guid, int> matchByJob, int minMatch) =>
-        minMatch <= 0 ? replies : replies.Where(r => matchByJob.TryGetValue(r.JobId, out var match) && match >= minMatch).ToList();
+    /// <summary>
+    /// "Match at least 70%": a reply whose job has no match percentage (never scored, or deleted since) is left out while a filter is on.
+    /// "Show": only one kind of answer (rejected, information requested, ...).
+    /// </summary>
+    internal static IReadOnlyList<EmployerReply> Filter(IReadOnlyList<EmployerReply> replies, IReadOnlyDictionary<Guid, int> matchByJob, int minMatch, string show = "")
+    {
+        IEnumerable<EmployerReply> kept = replies;
+        if (minMatch > 0) kept = kept.Where(r => matchByJob.TryGetValue(r.JobId, out var match) && match >= minMatch);
+        if (ListQuery.KindOf(show) is { } kind) kept = kept.Where(r => r.Kind == kind);
+        return kept as IReadOnlyList<EmployerReply> ?? kept.ToList();
+    }
 
     /// <summary>Replies without a match percentage come last, whichever way the percentage is sorted. Ties keep newest first.</summary>
     internal static IReadOnlyList<EmployerReply> Sort(IReadOnlyList<EmployerReply> replies, IReadOnlyDictionary<Guid, int> matchByJob, string sort)

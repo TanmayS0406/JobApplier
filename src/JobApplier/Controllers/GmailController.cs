@@ -17,11 +17,12 @@ public class GmailController : Controller
     private readonly AccountService _accounts;
     private readonly JobStore _jobs;
     private readonly SettingsService _settings;
+    private readonly ReplyComposer _composer;
     private readonly IHostApplicationLifetime _lifetime;
     private readonly ILogger<GmailController> _logger;
 
     public GmailController(IMailReader reader, MailChecker checker, ReplyStore replies, AccountService accounts, JobStore jobs, SettingsService settings,
-                           IHostApplicationLifetime lifetime, ILogger<GmailController> logger)
+                           ReplyComposer composer, IHostApplicationLifetime lifetime, ILogger<GmailController> logger)
     {
         _reader = reader;
         _checker = checker;
@@ -29,6 +30,7 @@ public class GmailController : Controller
         _accounts = accounts;
         _jobs = jobs;
         _settings = settings;
+        _composer = composer;
         _lifetime = lifetime;
         _logger = logger;
     }
@@ -141,12 +143,57 @@ public class GmailController : Controller
     [HttpPost]
     public IActionResult Dismiss(Guid id) => Json(new { ok = _replies.Dismiss(id) });
 
-    /// <summary>The replies card of the dashboard. Polled by the page; <c>page</c>, <c>size</c>, <c>sort</c> and <c>min</c> (match at least, in percent) page, sort and filter it.</summary>
+    /// <summary>
+    /// Opens an answer to an employer's mail: the draft saved earlier, or - when there is none, or <paramref name="startOver"/> is set - a new
+    /// one that Claude writes after reading the mail (a minute or so). Nothing is sent.
+    /// </summary>
+    [HttpPost]
+    public async Task<IActionResult> Draft(Guid id, bool startOver, CancellationToken cancellationToken)
+    {
+        ComposeResult result;
+        try
+        {
+            result = await _composer.DraftAsync(id, startOver, cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            return new EmptyResult();   // the window was closed while Claude was writing; the next open starts again
+        }
+
+        Response.Headers.CacheControl = "no-store";
+        return Json(new { ok = result.Ok, message = result.Message, body = result.Body, note = result.Note, fromSaved = result.FromSaved });
+    }
+
+    /// <summary>Keeps the text the user is working on, so closing the window does not lose it.</summary>
+    [HttpPost]
+    public IActionResult SaveDraft(Guid id, [FromForm] string? body)
+    {
+        var result = _composer.SaveDraft(id, body);
+        return Json(new { ok = result.Ok, message = result.Message });
+    }
+
+    /// <summary>
+    /// Sends the text as the answer to that mail, from the user's Gmail. This is the only action that sends anything, and only the user's own
+    /// press of Send reaches it. It is not tied to the browser request: if the page is closed while Gmail is being asked, the answer is still
+    /// either sent and recorded or not sent, never half of each.
+    /// </summary>
+    [HttpPost]
+    public async Task<IActionResult> Send(Guid id, [FromForm] string? body)
+    {
+        var result = await _composer.SendAsync(id, body, _lifetime.ApplicationStopping);
+        Response.Headers.CacheControl = "no-store";
+        return Json(new { ok = result.Ok, message = result.Message });
+    }
+
+    /// <summary>
+    /// The replies card of the dashboard. Polled by the page; <c>page</c>, <c>size</c>, <c>sort</c>, <c>min</c> (match at least, in percent) and
+    /// <c>show</c> (one kind of answer) page, sort and filter it.
+    /// </summary>
     [HttpGet]
-    public IActionResult Replies(int? page, int? size, string? sort, int? min)
+    public IActionResult Replies(int? page, int? size, string? sort, int? min, string? show = null)
     {
         Response.Headers.CacheControl = "no-store";
-        var query = ListQuery.Create(page, size, sort, min, ListQuery.ReplySorts);
+        var query = ListQuery.Create(page, size, sort, min, ListQuery.ReplySorts, show, ListQuery.ReplyShows);
         return PartialView("_Replies", RepliesViewModelBuilder.Build(_replies, _checker, _accounts, _jobs, query));
     }
 

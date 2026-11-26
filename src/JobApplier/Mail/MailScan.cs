@@ -83,6 +83,15 @@ public interface IMailReader
     /// <summary>Has Claude look through the mailbox for replies to the applications. Throws <see cref="MailReaderException"/> when it cannot.</summary>
     Task<IReadOnlyList<ScannedReply>> ScanAsync(MailScanRequest request, CancellationToken cancellationToken);
 
+    /// <summary>Has Claude read one employer's mail and write an answer to it. It only reads; nothing is sent. Throws <see cref="MailReaderException"/> when it cannot.</summary>
+    Task<ReplyDraft> DraftReplyAsync(DraftRequest request, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Sends an answer the user has read and approved, as a reply to one message, through the connector's reply tool and nothing else.
+    /// Returns only when Gmail confirmed it; throws <see cref="MailReaderException"/> otherwise (its message says whether it may have been sent anyway).
+    /// </summary>
+    Task<SendOutcome> SendReplyAsync(SendRequest request, CancellationToken cancellationToken);
+
     /// <summary>Opens Claude's own screen for connecting a connector. Returns an error message, or null when the window was opened.</summary>
     string? OpenConnectWindow();
 }
@@ -175,10 +184,10 @@ public static class MailScanPrompt
     }
 
     /// <summary>One line of text from a field that came from a web page or a screenshot: no line breaks, so it cannot add instructions of its own.</summary>
-    private static string Clean(string text)
+    internal static string Clean(string? text, int max = 120)
     {
         var line = string.Join(' ', (text ?? "").Split(new[] { '\r', '\n', '|' }, StringSplitOptions.RemoveEmptyEntries)).Trim();
-        return line.Length <= 120 ? line : line[..120];
+        return line.Length <= max ? line : line[..max];
     }
 
     private static string Host(string url) =>

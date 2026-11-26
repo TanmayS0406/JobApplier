@@ -470,7 +470,8 @@ public class ListEndpointTests
             jobs.Add(job);
             replies.Upsert(new[] { new EmployerReply { MessageId = "m" + i, JobId = job.Id, Company = "Co" + i, ReceivedUtc = DateTime.UtcNow.AddMinutes(-i) } });
         }
-        var controller = new GmailController(new FakeReader(), checker, replies, accounts, jobs, settings, new StubLifetime(), NullLogger<GmailController>.Instance)
+        var composer = new ReplyComposer(new FakeReader(), replies, new ProfileService(env.Paths), NullLogger<ReplyComposer>.Instance);
+        var controller = new GmailController(new FakeReader(), checker, replies, accounts, jobs, settings, composer, new StubLifetime(), NullLogger<GmailController>.Instance)
         {
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() }
         };

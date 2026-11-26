@@ -272,6 +272,18 @@ a.chip:hover { text-decoration: none; border-color: var(--accent); }
 .retry-dialog .options { margin-top: .9rem; }
 .retry-dialog input[type=number] { width: 5rem; }
 
+/* ---- answering an employer's mail ---- */
+.reply-sent { background: color-mix(in srgb, var(--good) 12%, var(--panel)); border-color: var(--good); color: var(--good); }
+.reply-dialog { border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); color: var(--text); padding: 0; width: min(46rem, calc(100% - 2rem)); }
+.reply-dialog::backdrop { background: rgba(10, 14, 24, .6); }
+.reply-dialog-body { padding: 1.2rem 1.4rem; }
+.reply-dialog h2 { margin: 0 0 .3rem; }
+.reply-dialog textarea { width: 100%; min-height: 15rem; font-family: inherit; line-height: 1.45; }
+.reply-dialog .banner { margin: .6rem 0; }
+.reply-dialog .banner[hidden], .reply-dialog .reply-note[hidden] { display: none; }
+.reply-note { padding: .4rem .7rem; border-left: 3px solid var(--mid); background: color-mix(in srgb, var(--mid) 10%, var(--panel)); }
+.compose-error { color: var(--low); }
+
 /* Insights */
 .card meter { width: 90px; height: 0.8em; vertical-align: middle; }
 .card h3 { margin: 1rem 0 0.4rem; font-size: 1rem; }

@@ -4,7 +4,12 @@
     {
         (ListQuery.SortNewest, "Newest reply first"), (ListQuery.SortMatchHigh, "Match: high to low"), (ListQuery.SortMatchLow, "Match: low to high")
     };
-    var replyBar = new ListBar(Model.Query, Model.Page, replySorts, "replies", Model.Total);
+    var replyShows = new[]
+    {
+        (ListQuery.ShowRejected, "Rejected"), (ListQuery.ShowInfo, "Info requested"), (ListQuery.ShowMoving, "Moving forward"),
+        (ListQuery.ShowOffer, "Offer"), (ListQuery.ShowReceived, "Received"), (ListQuery.ShowUnclear, "Unclear")
+    };
+    var replyBar = new ListBar(Model.Query, Model.Page, replySorts, "replies", Model.Total, replyShows);
     var kinds = new[] { ReplyKind.Offer, ReplyKind.MovingForward, ReplyKind.InfoRequested, ReplyKind.Rejected, ReplyKind.Acknowledged, ReplyKind.Unclear };
 }
 
@@ -91,6 +96,10 @@ else
                             {
                                 <span class="chip chip-unsure" title="The wording pointed two ways (for example a rejection that also mentions an interview). Open the mail to be sure.">check</span>
                             }
+                            @if (reply.RepliedUtc is DateTime answeredAt)
+                            {
+                                <span class="chip reply-sent" title="You answered this mail from here on @answeredAt.ToLocalTime().ToString("f")">you replied @RelativeTime.Ago(answeredAt)</span>
+                            }
                             <strong>@reply.Company</strong>
                             @if (reply.Role.Length > 0)
                             {
@@ -109,6 +118,13 @@ else
                             <div class="muted small reply-snippet">@reply.Snippet</div>
                         }
                         <div class="small reply-actions">
+                            @* The composer is one dialog outside this (self-refreshing) card; this button only tells it which mail it is for. *@
+                            <button type="button" class="btn compact" data-reply-compose="@reply.Id"
+                                    data-company="@reply.Company" data-role="@reply.Role" data-subject="@reply.AnswerSubject"
+                                    data-to="@reply.FromAddress" data-no-reply="@reply.IsNoReply.ToString().ToLowerInvariant()"
+                                    data-replied="@(reply.RepliedUtc is DateTime sentAt ? sentAt.ToLocalTime().ToString("f") : "")"
+                                    title="Have Claude write an answer to this mail. You read and change it, and nothing is sent until you press Send.">@(reply.RepliedUtc.HasValue ? "Reply again" : reply.DraftBody.Length > 0 ? "Continue draft" : "Reply")</button>
+                            &middot;
                             <a href="@reply.GmailLink" target="_blank" rel="noopener noreferrer">Open in Gmail</a>
                             &middot;
                             <button type="button" class="link" data-reply-dismiss="@reply.Id" title="Remove this reply. It will not be matched to a job again.">Not about this job</button>

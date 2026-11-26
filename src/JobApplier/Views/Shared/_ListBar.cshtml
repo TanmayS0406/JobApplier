@@ -1,6 +1,18 @@
 @model ListBar
 @* Sort, "match at least" and page size for a list. The page script (data-list-param) reloads the list with the new value; changing any of them goes back to page 1. *@
 <div class="list-bar">
+    @if (Model.Shows is { Count: > 0 })
+    {
+        <label>Show
+            <select data-list-param="show" aria-label="Only show these @Model.Noun">
+                <option value="" selected="@(Model.Query.Show.Length == 0)">all</option>
+                @foreach (var (value, label) in Model.Shows)
+                {
+                    <option value="@value" selected="@(Model.Query.Show == value)">@label</option>
+                }
+            </select>
+        </label>
+    }
     <label>Sort
         <select data-list-param="sort" aria-label="Sort the @Model.Noun">
             @foreach (var (value, label) in Model.Sorts)

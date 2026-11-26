@@ -151,6 +151,45 @@ public sealed class ReplyStore
         }
     }
 
+    /// <summary>A copy of one reply, or null when there is none with that id (it may have been dismissed meanwhile).</summary>
+    public EmployerReply? Find(Guid replyId)
+    {
+        lock (_gate) return _replies.FirstOrDefault(r => r.Id == replyId)?.Copy();
+    }
+
+    /// <summary>Keeps the answer being written. An empty text removes the saved draft.</summary>
+    public bool SaveDraft(Guid replyId, string body, DateTime utc)
+    {
+        lock (_gate)
+        {
+            var reply = _replies.FirstOrDefault(r => r.Id == replyId);
+            if (reply == null) return false;
+
+            // Nothing but spaces is no draft: "Continue draft" and the saved-draft check both look at the length.
+            var empty = string.IsNullOrWhiteSpace(body);
+            reply.DraftBody = empty ? "" : body!;
+            reply.DraftSavedUtc = empty ? null : utc;
+            JsonFile.Write(_paths.RepliesFile, _replies);
+            return true;
+        }
+    }
+
+    /// <summary>An answer to this mail was sent: that is remembered and the draft is no longer needed.</summary>
+    public bool MarkReplied(Guid replyId, DateTime utc)
+    {
+        lock (_gate)
+        {
+            var reply = _replies.FirstOrDefault(r => r.Id == replyId);
+            if (reply == null) return false;
+
+            reply.RepliedUtc = utc;
+            reply.DraftBody = "";
+            reply.DraftSavedUtc = null;
+            JsonFile.Write(_paths.RepliesFile, _replies);
+            return true;
+        }
+    }
+
     /// <summary>The user says this message is not about that application: it is removed and never matched again.</summary>
     public bool Dismiss(Guid replyId)
     {

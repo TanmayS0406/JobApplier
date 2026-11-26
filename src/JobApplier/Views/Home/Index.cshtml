@@ -71,3 +71,6 @@
 
 @* Outside #live on purpose: that area is replaced every 2.5 seconds, which would close the dialog while someone is choosing. *@
 <partial name="_RetryDialog" model="new RetryDialogModel(Model.DefaultAutoSubmit, Model.DefaultMinMatch, Model.DefaultRequireVisaOrRelocation)" />
+
+@* Outside #replies for the same reason: that card is redrawn every minute, and an answer is being typed in this window. *@
+<partial name="_ReplyDialog" />

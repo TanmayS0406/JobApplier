@@ -1,0 +1,35 @@
+@*
+    The window for answering an employer's mail. Claude writes a draft after reading the mail; the user reads it, changes it and presses Send.
+    It is placed OUTSIDE the replies card, which refreshes itself, so a refresh cannot close it or wipe what is being typed.
+    The "Reply" button of a mail (data-reply-compose) says which mail it is for and fills in the heading; nothing here is ever drawn from mail text
+    except through textContent / the textarea's value, never as markup.
+*@
+<dialog id="reply-dialog" class="reply-dialog"
+        data-draft-url="@Url.Action("Draft", "Gmail")" data-save-url="@Url.Action("SaveDraft", "Gmail")" data-send-url="@Url.Action("Send", "Gmail")">
+    <div class="reply-dialog-body">
+        <h2 data-compose-title>Reply</h2>
+        <p class="muted small" data-compose-context></p>
+
+        <div class="banner banner-warn" data-compose-noreply hidden>
+            This mail was sent from an address that looks like a no-reply address, so an answer will probably not be read by anyone.
+        </div>
+        <div class="banner" data-compose-replied hidden></div>
+
+        <p class="small" data-compose-status role="status" aria-live="polite"></p>
+        <p class="small reply-note" data-compose-note hidden></p>
+
+        <textarea data-compose-body rows="12" maxlength="6000" aria-label="Your answer" disabled></textarea>
+
+        <p class="muted small">
+            This is sent from your own Gmail, through the Gmail connector of your Claude account, exactly as it is written here. Parts marked
+            <code>[[like this]]</code> are things Claude could not know; replace them first. Nothing is sent until you press Send.
+        </p>
+
+        <div class="actions">
+            <button type="button" class="btn primary" data-compose-send disabled>Send</button>
+            <button type="button" class="btn" data-compose-save disabled title="Keep this text and come back to it later">Save draft</button>
+            <button type="button" class="btn ghost" data-compose-again disabled title="Have Claude write a new draft. The text above is replaced.">Write it again</button>
+            <button type="button" class="btn ghost" data-compose-close>Close</button>
+        </div>
+    </div>
+</dialog>

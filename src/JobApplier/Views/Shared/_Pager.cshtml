@@ -14,7 +14,7 @@
             }
             @if (Model.IsFiltered)
             {
-                <text> (match at least @(Model.Query.MinMatch)%, @Model.Unfiltered in total)</text>
+                <text> (@Model.FilterText, @Model.Unfiltered in total)</text>
             }
         </span>
         @if (Model.Page.TotalPages > 1)

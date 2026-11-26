@@ -52,6 +52,7 @@ keeps you in charge: by default every application stops at a review step until y
   stage they reached**. Hit your Claude or Copilot usage limit? The job waits for the reset and **resumes by itself**.
 - 📬 **See who answered.** Optional reply tracking reads your Gmail through your Claude account's Gmail connector (read-only, **no
   Google sign-in, no Cloud project**) and labels each application: received, moving forward, info requested, rejected, offer.
+  Filter by rejected, info requested or skipped, and press **Reply**: Claude drafts an answer, you edit it, and it is sent only when you press Send.
 - 📈 **Resume gap analysis.** The Insights page counts the skills your collected jobs keep asking for, ranks which single resume
   change would lift the most of them over your match threshold, and refuses to suggest claiming anything your resume can't back up.
 - 🏠 **Local only.** The UI and its MCP endpoint listen on `127.0.0.1` and nowhere else. Your data stays on your PC, apart from what
@@ -137,8 +138,8 @@ More detail, including auto-submit and the GitHub Copilot sign-in walkthrough: [
 | **Keeps records** | one Word document on your Desktop with every account (site, e-mail, password) and every application (company, role, URL). |
 | **Survives interruptions** | durable queue, per-stage checkpoints, automatic wait-and-resume on usage limits, a queue dashboard at `/hangfire`. |
 | **Retries on your terms** | *Retry all failed*, *Retry when available*, and a dialog to choose auto-submit and minimum match for each retry. |
-| **Sorts and filters** | results and replies by newest or match %, filtered by "match at least 50-90%", paged, and kept in the URL. |
-| **Tracks employer replies** | optional, read-only, English and Spanish. See [docs/gmail-replies.md](docs/gmail-replies.md). |
+| **Sorts and filters** | results and replies by newest or match %, filtered by "match at least 50-90%" and by outcome (rejected, info requested, skipped, no reply yet...), paged, and kept in the URL. |
+| **Tracks employer replies** | optional, English and Spanish; reading is read-only. You can have Claude draft an answer and send it with one click. See [docs/gmail-replies.md](docs/gmail-replies.md). |
 | **Explains your gaps** | skill gaps, a "what to change first" plan with a Monte Carlo range, and job families. See [docs/resume-insights.md](docs/resume-insights.md). |
 
 ## Safe by default
@@ -147,7 +148,8 @@ More detail, including auto-submit and the GitHub Copilot sign-in walkthrough: [
 - **Web pages, screenshots and job descriptions are treated as untrusted data.** The agent is told never to follow instructions found
   in them, never to type your details anywhere but the application form, and never to pay, download or install anything.
 - **Strict by construction.** Agents run with `--strict-mcp-config` and a permission mode that denies anything not explicitly
-  allowed; the Gmail scan is limited, by tool name, to the connector's search and read tools.
+  allowed; the Gmail scan and the drafting of an answer are limited, by tool name, to the connector's search and read tools, and the
+  one run that sends an answer (only when you press Send) gets the connector's reply tool and nothing else.
 - **The job log shows what the agent *did* ("typed into *Password field*"), never what it typed.**
 - Anti-forgery tokens on every form, a strict Content-Security-Policy, and a per-run bearer token on the MCP endpoint.
 
@@ -165,6 +167,8 @@ More detail, including auto-submit and the GitHub Copilot sign-in walkthrough: [
 - **A job only counts as offering visa sponsorship or relocation if its posting says so.** A posting that is silent is skipped when you
   ask for that, and a screenshot of a list entry has little text to go on.
 - **Gmail reply tracking has not been tested against a real mailbox yet.** It is covered against a fake `claude` CLI; reports from real use are welcome.
+  That goes double for **sending an answer**: it has never sent a real mail. Check the first one in your Gmail's *Sent* folder (and send the first one to
+  an address you control) before relying on it.
 
 ## Under the hood
 

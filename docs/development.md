@@ -9,8 +9,9 @@ src/JobApplier/
   Agents/     Prompts, AgentFactory, JobWorkflow (the four stages as Agent Framework executors)
   Claude/     CliAgent (the shared AIAgent base), ClaudeCodeAgent + ClaudeCli, CopilotCliAgent + CopilotCli + CopilotStream
               (event decoder, MCP config), JsonExtract, tool-activity log lines
-  Mail/       Gmail replies: ClaudeMailReader (connector probe + read-only scan), GmailToolPolicy, MailScanPrompt, MailChecker +
-              MailWatcher, ReplyStore
+  Mail/       Gmail replies: ClaudeMailReader (connector probe, read-only scan, draft, and the one send), GmailToolPolicy,
+              MailScanPrompt, MailChecker + MailWatcher, ReplyStore, ReplyComposer (draft / save / send with the double-send
+              guards) + ReplyPrompts (draft and send prompts, ReplyText)
   Insights/   resume gap analysis: SkillNormalizer, TF-IDF + K-Means (ML.NET), calibration + coverage plan (Math.NET), ResumeCoach
   Mcp/        JobMcpServer - wait_for_user, record_account, report_progress
   Persistence/ the EF Core model (JobApplierDbContext), Migrations/, EfJobPersistence, start-up migration, import of the old job.json files
@@ -34,7 +35,9 @@ Hangfire is replaced by a recording queue, and the tests check queuing, cancelli
 the job back, the app being closed mid-run, and a restart that continues from the stage reached. Separate tests check that the
 migrations match the model and never use the `json` column type that SQL Server 2022 lacks. The Gmail part is covered against a fake `claude` CLI (a script that answers from a scenario file and records how it was
 called): the connector probe, the read-only tool restriction and the exact arguments of a scan, a connector that needs sign-in or
-drops out, usage limits, timeouts, and what is accepted from Claude's answer.
+drops out, usage limits, timeouts, and what is accepted from Claude's answer. The same fake models a send: the draft run is checked
+never to be allowed the reply tool, the send run to be allowed that tool alone, and "sent" to follow Gmail's tool result (refused, no answer
+at all, an answer that arrives after a failed run) rather than Claude's own claim.
 
 The GitHub Copilot provider is covered the same way against a fake `copilot` (Windows with Node.js on the PATH; otherwise those tests
 return early): the exact arguments and permission rules a run starts with, the task file and its removal, the MCP config kept out of the
