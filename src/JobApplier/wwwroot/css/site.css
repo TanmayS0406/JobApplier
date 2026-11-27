@@ -287,3 +287,6 @@ a.chip:hover { text-decoration: none; border-color: var(--accent); }
 /* Insights */
 .card meter { width: 90px; height: 0.8em; vertical-align: middle; }
 .card h3 { margin: 1rem 0 0.4rem; font-size: 1rem; }
+
+.inline-form { display: inline; margin: 0 .6rem; }
+input[data-model-input][hidden] { display: none; }

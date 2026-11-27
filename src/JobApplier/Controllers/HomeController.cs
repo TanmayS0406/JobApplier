@@ -35,7 +35,7 @@ public class HomeController : Controller
         return View(new DashboardViewModel
         {
             // Each list reads its own page, sort and filter from the dashboard's address (jobs_page, replies_sort, ...), so a reload shows the same page.
-            Live = LiveViewModelBuilder.Build(_store, _runner.PausedUntilUtc, _replies, ListQuery.FromQuery(Request.Query, "jobs", ListQuery.JobSorts, ListQuery.JobShows)),
+            Live = LiveViewModelBuilder.Build(_store, _runner.PausedUntilUtc, _replies, ListQuery.FromQuery(Request.Query, "jobs", ListQuery.JobSorts, ListQuery.JobShows), _runner.HeldByUser),
             Replies = RepliesViewModelBuilder.Build(_replies, _checker, _accounts, _store, ListQuery.FromQuery(Request.Query, "replies", ListQuery.ReplySorts, ListQuery.ReplyShows)),
             HasResume = _profile.HasResume && !string.IsNullOrWhiteSpace(profile.ResumeText),
             HasEmail = !string.IsNullOrWhiteSpace(profile.Email),
@@ -52,10 +52,18 @@ public class HomeController : Controller
     [HttpGet]
     public IActionResult Live(int? page, int? size, string? sort, int? min, string? show = null)
     {
-        var model = LiveViewModelBuilder.Build(_store, _runner.PausedUntilUtc, _replies, ListQuery.Create(page, size, sort, min, ListQuery.JobSorts, show, ListQuery.JobShows));
+        var model = LiveViewModelBuilder.Build(_store, _runner.PausedUntilUtc, _replies, ListQuery.Create(page, size, sort, min, ListQuery.JobSorts, show, ListQuery.JobShows), _runner.HeldByUser);
         Response.Headers["X-Help-Count"] = model.Help.Count.ToString();
         Response.Headers.CacheControl = "no-store";
         return PartialView("_Live", model);
+    }
+
+    /// <summary>"Resume now": jobs held since the usage limit ("Pause when the usage limit ends" is on in Settings) start again.</summary>
+    [HttpPost]
+    public IActionResult Resume()
+    {
+        _runner.ResumeAfterLimit();
+        return RedirectToAction(nameof(Index));
     }
 
     [ResponseCache(Duration = 0, Location = ResponseCacheLocation.None, NoStore = true)]

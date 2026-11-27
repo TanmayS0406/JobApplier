@@ -27,7 +27,15 @@
     var jobBar = new ListBar(Model.Query, Model.Page, jobSorts, "jobs", Model.Counts.Total, jobShows);
 }
 
-@if (Model.PausedUntilUtc is DateTime pausedUntil)
+@if (Model.HeldByUser)
+{
+    <div class="banner banner-warn">
+        <strong>Paused.</strong> The AI usage limit was reached and <em>Pause when the usage limit ends</em> is on in Settings, so no job starts or retries now - your Claude / Copilot usage is free for other things.
+        <form asp-controller="Home" asp-action="Resume" method="post" class="inline-form"><button type="submit" class="btn primary compact">Resume now</button></form>
+        <a asp-controller="Settings" asp-action="Index">Settings</a>
+    </div>
+}
+else if (Model.PausedUntilUtc is DateTime pausedUntil)
 {
     <div class="banner banner-warn">
         <strong>The AI usage limit was reached.</strong>

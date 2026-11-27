@@ -74,6 +74,9 @@ public sealed class LiveViewModel
     /// <summary>Set while new jobs are held back because the AI usage limit was reached.</summary>
     public DateTime? PausedUntilUtc { get; init; }
 
+    /// <summary>A usage limit was hit and the user chose not to resume by themselves: nothing starts until they press Resume.</summary>
+    public bool HeldByUser { get; init; }
+
     /// <summary>The jobs on the current page, after the filter and the sort.</summary>
     public IReadOnlyList<JobRow> Rows { get; init; } = Array.Empty<JobRow>();
 

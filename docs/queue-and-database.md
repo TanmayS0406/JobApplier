@@ -21,7 +21,7 @@ and says which setting to check.
   continues **from the stage it had reached** (reading the screenshot, finding the posting and scoring are stored on the job and are not
   redone). A job that was filling in a form starts that stage again; if the application had already gone through, the site says so and it
   is recorded as applied.
-* **Out of tokens?** The job that hit the limit waits for the reset and **continues by itself**, with nothing to press: a recurring Hangfire
+* **Out of tokens?** The job that hit the limit waits for the reset and **continues by itself**, with nothing to press (unless *Pause when the usage limit ends* is on in Settings: then nothing starts or retries after the reset until you press *Resume now* on the dashboard; turning the setting off lifts the hold at once): a recurring Hangfire
   check looks every minute, and the wait survives restarts. Jobs that have not started are held back until the limit is over, so they do
   not all fail the same way.
 * **The queue dashboard** (*Queue* in the menu, or <http://127.0.0.1:5189/hangfire>) shows what is waiting, running or scheduled for after a

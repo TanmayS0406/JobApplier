@@ -1,0 +1,11 @@
+@model ModelPicker
+@* A dropdown of every known model. "Other" shows a text box for a name that is not listed. The text box is what is posted; the page script keeps it in step with the dropdown (data-model-select). *@
+@{ var known = Model.Choices.Any(c => c.Value == Model.Value); }
+<select data-model-select aria-label="@Model.Name">
+    @foreach (var (value, label) in Model.Choices)
+    {
+        <option value="@value" selected="@(known && value == Model.Value)">@label</option>
+    }
+    <option value="__other" selected="@(!known)">Other (type the name)...</option>
+</select>
+<input name="@Model.Name" value="@Model.Value" placeholder="model name" hidden="@known" data-model-input />

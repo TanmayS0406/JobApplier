@@ -6,7 +6,7 @@ namespace JobApplier.Models;
 
 public static class LiveViewModelBuilder
 {
-    public static LiveViewModel Build(JobStore store, DateTime? pausedUntilUtc = null, ReplyStore? replies = null, ListQuery? query = null)
+    public static LiveViewModel Build(JobStore store, DateTime? pausedUntilUtc = null, ReplyStore? replies = null, ListQuery? query = null, bool heldByUser = false)
     {
         query ??= ListQuery.Default;
 
@@ -26,6 +26,7 @@ public static class LiveViewModelBuilder
             Page = info,
             Help = help,
             PausedUntilUtc = pausedUntilUtc,
+            HeldByUser = heldByUser,
             RepliesTracked = replies?.State().Enabled ?? false,
             Replies = latestReply
         };

@@ -49,7 +49,7 @@ keeps you in charge: by default every application stops at a review step until y
 - 🔐 **Passwords never reach the model.** A strong password is generated per site and substituted *inside* the browser tool. The
   agent only ever types a placeholder name, and tool output is redacted.
 - 💾 **Close it, kill it, reboot. Nothing is lost.** Jobs live in SQL Server behind a durable Hangfire queue and continue **from the
-  stage they reached**. Hit your Claude or Copilot usage limit? The job waits for the reset and **resumes by itself**.
+  stage they reached**. Hit your Claude or Copilot usage limit? The job waits for the reset and **resumes by itself** - or, with *Pause when the usage limit ends* in Settings, waits for your **Resume now** so you can use Claude elsewhere.
 - 📬 **See who answered.** Optional reply tracking reads your Gmail through your Claude account's Gmail connector (read-only, **no
   Google sign-in, no Cloud project**) and labels each application: received, moving forward, info requested, rejected, offer.
   Filter by rejected, info requested or skipped, and press **Reply**: Claude drafts an answer, you edit it, and it is sent only when you press Send.

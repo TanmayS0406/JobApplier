@@ -489,4 +489,10 @@ public sealed class AppSettings
 
     /// <summary>How often, in hours, the mailbox is checked by itself once reply tracking is on. 0 = only when asked.</summary>
     public int MailAutoCheckHours { get; set; } = 6;
+
+    /// <summary>
+    /// Pauses jobs once the AI usage limit has been hit: when it ends, nothing starts by itself until the user presses Resume (the dashboard
+    /// banner has the button). The Claude / Copilot usage is then free for other things. Off (the default) = jobs resume by themselves.
+    /// </summary>
+    public bool PauseAfterLimit { get; set; }
 }

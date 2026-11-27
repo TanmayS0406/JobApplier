@@ -161,8 +161,7 @@
                     With Copilot the result format is requested in the prompt rather than enforced by the CLI.</small>
             </label>
             <label>Claude model
-                <input name="Model" value="@s.Model" list="models" placeholder="empty = Claude Code default" />
-                <datalist id="models"><option value="sonnet"></option><option value="opus"></option><option value="haiku"></option><option value="fable"></option></datalist>
+                <partial name="_ModelPicker" model='new ModelPicker("Model", s.Model, ModelChoices.Claude)' />
             </label>
             <label>Effort (Claude only)
                 <select name="Effort">
@@ -173,9 +172,13 @@
                 </select>
             </label>
             <label>GitHub Copilot model
-                <input name="CopilotModel" value="@s.CopilotModel" list="copilot-models" placeholder="empty = Copilot CLI default" />
-                <datalist id="copilot-models"><option value="auto"></option></datalist>
-                <small><code>auto</code> lets Copilot pick; or name a model your plan offers (run <code>copilot --help</code> or use <code>/model</code> in the CLI to see them).</small>
+                <partial name="_ModelPicker" model='new ModelPicker("CopilotModel", s.CopilotModel, ModelChoices.Copilot)' />
+                <small><code>auto</code> lets Copilot pick. What a plan offers varies and the CLI cannot list it, so choose <em>Other</em> to type a model from <code>/model</code> in the CLI.</small>
+            </label>
+            <label class="check wide">
+                <input type="checkbox" name="PauseAfterLimit" value="true" @(s.PauseAfterLimit ? "checked" : null) />
+                <span><strong>Pause when the usage limit ends (do not resume by itself)</strong>
+                    <small>Off: jobs that were waiting for the Claude / Copilot usage limit start again as soon as it resets. On: they stay paused until you press <em>Resume now</em> on the dashboard, so you can use Claude somewhere else.</small></span>
             </label>
             <label>Jobs at the same time<input name="MaxParallelJobs" type="number" min="1" max="8" value="@s.MaxParallelJobs" /></label>
             <label>Help timeout (minutes)<input name="HelpTimeoutMinutes" type="number" min="2" max="240" value="@s.HelpTimeoutMinutes" /></label>
@@ -186,8 +189,7 @@
         <h2>Reply tracking</h2>
         <div class="form-grid">
             <label>Model that reads the mailbox
-                <input name="MailModel" value="@s.MailModel" list="mail-models" placeholder="empty = Claude Code default" />
-                <datalist id="mail-models"><option value="haiku"></option><option value="sonnet"></option></datalist>
+                <partial name="_ModelPicker" model='new ModelPicker("MailModel", s.MailModel, ModelChoices.Claude)' />
                 <small>A small model is enough for this and uses the least of your Claude usage. It always runs on Claude, whichever AI provider runs the jobs.</small>
             </label>
             <label>Check by itself every (hours)

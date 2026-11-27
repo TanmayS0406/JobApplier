@@ -36,6 +36,12 @@ public sealed class JobRunner
     private readonly SlotGate _slots = new();
     private long _pausedUntilTicks;
 
+    /// <summary>A usage limit was hit and nobody has resumed since. Only matters while <see cref="AppSettings.PauseAfterLimit"/> is on.</summary>
+    private volatile bool _limitHit;
+
+    /// <summary>How often a job that is held for the user looks again whether it may start.</summary>
+    private static readonly TimeSpan HeldRecheck = TimeSpan.FromMinutes(2);
+
     public JobRunner(JobStore store, HumanHelpBroker help, SettingsService settings, PipelineServices pipeline, IJobQueue queue,
         ILogger<JobRunner> logger, IHostApplicationLifetime? lifetime = null)
     {
@@ -188,6 +194,7 @@ public sealed class JobRunner
             .Select(j => j.RetryAfterUtc)
             .Max();
         if (stillLimited != null) NoteUsageLimit(stillLimited);
+        else if (_store.ReadAll(r => r.WaitingForLimitReset).Any(waiting => waiting)) _limitHit = true;   // a limit was hit before the restart and not resumed
 
         var unfinished = _store.ReadAll(r => (r.Id, r.Status, r.QueueId, r.CreatedUtc))
             .Where(j => !j.Status.IsTerminal())
@@ -227,9 +234,22 @@ public sealed class JobRunner
         }
     }
 
+    /// <summary>
+    /// True while the limit has ended (or not) but the user has chosen to pause after a limit (Settings) and has not pressed Resume yet:
+    /// no queued job starts and no waiting job is retried. Turning the setting back on lifts it at once.
+    /// </summary>
+    public bool HeldByUser => _limitHit && _settings.Current.PauseAfterLimit;
+
+    /// <summary>The user says go on: jobs held since the usage limit start again (the limit itself, if still in force, still holds them).</summary>
+    public void ResumeAfterLimit() => _limitHit = false;
+
+    /// <summary>Until when a job must not start, or null when it may: the usage limit, or a short while ahead when the user is holding jobs back.</summary>
+    private DateTime? HoldUntil() => PausedUntilUtc ?? (HeldByUser ? Clock() + HeldRecheck : null);
+
     /// <summary>Holds back new jobs until the limit should be over (plus a small margin). A later, longer limit wins; a shorter one never shortens it.</summary>
     public void NoteUsageLimit(DateTime? resetUtc)
     {
+        _limitHit = true;
         var now = Clock();
         var until = (resetUtc ?? now + UsageLimit.Backoff(0)) + ResetMargin;
         if (until > now.AddDays(8)) until = now.AddDays(8);
@@ -296,6 +316,7 @@ public sealed class JobRunner
     internal int RetryDueJobs(DateTime nowUtc)
     {
         if (PausedUntilUtc is { } until && until > nowUtc) return 0;
+        if (HeldByUser) return 0;   // the user chose to resume by hand
 
         var waiting = _store.ReadAll(r => (r.Id, Wait: r.WaitingForLimitReset, r.RetryAfterUtc, r.LimitRetries, r.UpdatedUtc)).Where(j => j.Wait);
         var started = 0;
@@ -386,7 +407,7 @@ public sealed class JobRunner
         // Removed, or finished some other way, since it was queued.
         if (!_store.Exists(jobId) || _store.Read(jobId, r => r.Status.IsTerminal())) return false;
 
-        if (PausedUntilUtc is { } hold && Defer(jobId, pending, hold)) return true;
+        if (HoldUntil() is { } hold && Defer(jobId, pending, hold)) return true;
 
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(pending.Cts.Token, shutdown);
         SlotGate.Lease? slot = null;
@@ -396,7 +417,7 @@ public sealed class JobRunner
             slot = await _slots.EnterAsync(() => _settings.Current.MaxParallelJobs, linked.Token);
 
             // A job that ran while this one waited for its slot may have used up the tokens.
-            if (PausedUntilUtc is { } laterHold && Defer(jobId, pending, laterHold)) return true;
+            if (HoldUntil() is { } laterHold && Defer(jobId, pending, laterHold)) return true;
 
             started = true;
             _store.Log(jobId, "info", "Started.");
@@ -466,7 +487,9 @@ public sealed class JobRunner
             {
                 r.Status = JobStatus.Queued;
                 r.QueueId = queueId;
-                r.StatusDetail = "Waiting for the AI usage limit to reset, " + UsageLimit.Describe(untilUtc, Clock()) + ". It starts by itself.";
+                r.StatusDetail = PausedUntilUtc == null
+                    ? "Paused: the AI usage limit was reached and pausing after a limit is on. Press Resume on the dashboard (or turn it on in Settings)."
+                    : "Waiting for the AI usage limit to reset, " + UsageLimit.Describe(untilUtc, Clock()) + ". It starts by itself.";
             });
             return true;
         }

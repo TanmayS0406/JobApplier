@@ -120,6 +120,17 @@
         try { await redrawArea(area); } catch { /* the next poll will try again */ }
     });
 
+    // Settings: a model dropdown (data-model-select) keeps its text box in step; "Other" shows the box so any model name can be typed.
+    document.addEventListener('change', (event) => {
+        const select = event.target instanceof Element ? event.target.closest('[data-model-select]') : null;
+        const input = select?.parentElement.querySelector('[data-model-input]');
+        if (!select || !input) return;
+        const other = select.value === '__other';
+        input.hidden = !other;
+        input.value = other ? '' : select.value;
+        if (other) input.focus();
+    });
+
     // A select that applies itself: the Insights threshold.
     document.addEventListener('change', (event) => {
         const select = event.target instanceof Element ? event.target.closest('[data-auto-submit]') : null;
