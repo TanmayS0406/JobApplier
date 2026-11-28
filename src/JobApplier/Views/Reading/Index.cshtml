@@ -1,0 +1,46 @@
+@model JobApplier.Reading.ReadingPage
+<section class="card">
+    <div class="card-head">
+        <h2>Bonus reading</h2>
+        <span class="muted small">latest from Microsoft and other trusted sources, fetched @Model.FetchedUtc.ToLocalTime().ToString("g")</span>
+    </div>
+
+    <form method="get" class="reading-filter">
+        <select name="source" aria-label="Source">
+            <option value="">All sources</option>
+            @foreach (var s in Model.Sources)
+            {
+                <option value="@s" selected="@(s == Model.Source)">@s</option>
+            }
+        </select>
+        <input type="text" name="q" value="@Model.Query" placeholder="Search titles and summaries" aria-label="Search" />
+        <button type="submit" class="btn compact">Show</button>
+        <a class="btn ghost compact" asp-action="Index" asp-route-refresh="true">Refresh now</a>
+    </form>
+
+    @if (Model.Failed.Count > 0)
+    {
+        <div class="banner banner-warn">Could not reach: @string.Join(", ", Model.Failed). The others are shown.</div>
+    }
+
+    <p class="muted small">Showing @Model.Articles.Count of @Model.Total articles.</p>
+
+    @if (Model.Articles.Count == 0)
+    {
+        <p class="muted">Nothing matches. Try another source or word, or press Refresh now.</p>
+    }
+
+    <ul class="reading-list">
+        @foreach (var a in Model.Articles)
+        {
+            <li>
+                <a href="@a.Link" target="_blank" rel="noopener noreferrer" class="reading-title">@a.Title</a>
+                <div class="muted small">@a.Source @(a.Published == DateTimeOffset.MinValue ? "" : "· " + a.Published.ToLocalTime().ToString("d MMM yyyy"))</div>
+                @if (a.Summary.Length > 0)
+                {
+                    <p class="reading-summary">@a.Summary</p>
+                }
+            </li>
+        }
+    </ul>
+</section>
