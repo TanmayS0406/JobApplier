@@ -1,0 +1,70 @@
+@model JobApplier.Interview.InterviewPage
+<div class="iq">
+    <aside class="card iq-side">
+        <h2>Subjects</h2>
+        <ul class="iq-list">
+            @foreach (var s in Model.Subjects)
+            {
+                <li class="@(s.Key == Model.Selected ? "on" : "")">
+                    <a asp-action="Index" asp-route-segment="@s.Key"><span>@s.Label</span> <span class="muted small">@s.Count</span></a>
+                </li>
+            }
+        </ul>
+        <p class="muted small">Saved in <code>@Model.Root</code>. Earlier sets are never deleted.</p>
+    </aside>
+
+    <section class="card iq-main">
+        @if (Model.Selected is null)
+        {
+            <h2>Interview questions</h2>
+            <p class="muted">Choose a subject on the left. Each time you press <em>Generate</em>, Claude writes a new set of questions with model answers, from easy to complex, based on your resume and the jobs you are applying for. Every set is saved as a file on your Desktop, and older sets are kept.</p>
+        }
+        else
+        {
+            <h2>@Model.SelectedLabel</h2>
+            <form asp-action="Generate" method="post" class="iq-generate" data-busy="Claude is writing the questions. This can take several minutes.">
+                <input type="hidden" name="segment" value="@Model.Selected" />
+                <label>How many
+                    <select name="count">
+                        <option value="50">50</option>
+                        <option value="100" selected>100</option>
+                        <option value="150">150</option>
+                        <option value="200">200</option>
+                    </select>
+                </label>
+                <button type="submit" class="btn primary">Generate new questions</button>
+            </form>
+            @if (!string.IsNullOrEmpty(Model.Message))
+            {
+                <div class="banner banner-ok">@Model.Message</div>
+            }
+            @if (!string.IsNullOrEmpty(Model.Error))
+            {
+                <div class="banner banner-error">@Model.Error</div>
+            }
+
+            <h3>Saved sets (@Model.Sets.Count)</h3>
+            @if (Model.Sets.Count == 0)
+            {
+                <p class="muted">None yet. Press Generate to write the first set.</p>
+            }
+            else
+            {
+                <ul class="iq-sets">
+                    @foreach (var set in Model.Sets)
+                    {
+                        <li class="@(set.FileName == Model.OpenFile ? "on" : "")">
+                            <a asp-action="Index" asp-route-segment="@Model.Selected" asp-route-file="@set.FileName">@set.FileName</a>
+                            <span class="muted small">@set.Count questions, written @set.WrittenLocal.ToString("g")</span>
+                        </li>
+                    }
+                </ul>
+            }
+
+            @if (Model.OpenFile != null)
+            {
+                <pre class="iq-text">@Model.Content</pre>
+            }
+        }
+    </section>
+</div>

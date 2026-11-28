@@ -8,6 +8,7 @@ using JobApplier.Claude;
 using JobApplier.Persistence;
 using JobApplier.Infrastructure;
 using JobApplier.Insights;
+using JobApplier.Interview;
 using JobApplier.Mail;
 using JobApplier.Mcp;
 using JobApplier.Services;
@@ -41,6 +42,7 @@ builder.Services.AddSingleton<IMailReader, ClaudeMailReader>();
 builder.Services.AddSingleton<ReplyStore>();
 builder.Services.AddSingleton<MailChecker>();
 builder.Services.AddSingleton<ReplyComposer>();
+builder.Services.AddSingleton<InterviewGenerator>();
 builder.Services.AddSingleton<VerificationMailService>();
 builder.Services.AddHostedService<MailWatcher>();
 

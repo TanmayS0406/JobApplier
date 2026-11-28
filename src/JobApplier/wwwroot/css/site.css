@@ -296,3 +296,16 @@ input[data-model-input][hidden] { display: none; }
 .list-search input { width: min(20rem, 100%); }
 #replies.collapsed .replies-card > :not(.card-head) { display: none; }
 #replies.collapsed .when-open, #replies:not(.collapsed) .when-closed { display: none; }
+
+/* ---- interview questions ---- */
+.iq { display: grid; grid-template-columns: 17rem 1fr; gap: 1rem; align-items: start; }
+.iq-list, .iq-sets { list-style: none; margin: .4rem 0; padding: 0; }
+.iq-list a { display: flex; justify-content: space-between; gap: .5rem; padding: .45rem .6rem; border-radius: 6px; text-decoration: none; color: var(--text); }
+.iq-list a:hover { background: color-mix(in srgb, var(--accent) 10%, var(--panel)); }
+.iq-list li.on a { background: var(--accent); color: var(--accent-text); }
+.iq-sets li { padding: .35rem .5rem; border-radius: 6px; }
+.iq-sets li.on { background: color-mix(in srgb, var(--accent) 12%, var(--panel)); }
+.iq-generate { display: flex; flex-wrap: wrap; align-items: center; gap: .8rem; margin: .6rem 0 1rem; }
+.iq-generate select { width: auto; }
+.iq-text { white-space: pre-wrap; max-height: 65vh; overflow: auto; background: var(--code-bg); padding: 1rem; border-radius: 8px; font-size: .9rem; }
+@media (max-width: 800px) { .iq { grid-template-columns: 1fr; } }
