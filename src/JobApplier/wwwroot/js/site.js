@@ -78,7 +78,7 @@
     // A list lives in an area with data-poll-url and data-list-prefix. Its controls carry data-list-param (a select), data-list-page
     // (a page button) or data-list-reset. The state is kept in the poll address of the area (so polling does not jump back to page 1)
     // and mirrored in the page address as {prefix}_page, {prefix}_sort, ... so a reload or a copied link shows the same page.
-    const listKeys = ['page', 'size', 'sort', 'min', 'show'];
+    const listKeys = ['page', 'size', 'sort', 'min', 'show', 'q'];
 
     function setListParams(area, changes) {
         const poll = new URL(area.dataset.pollUrl, location.origin);
@@ -116,7 +116,7 @@
         if (!pageButton && !reset) return;
         if (pageButton?.disabled) return;
 
-        setListParams(area, pageButton ? { page: pageButton.dataset.listPage } : { min: '', show: '', page: '' });
+        setListParams(area, pageButton ? { page: pageButton.dataset.listPage } : { min: '', show: '', q: '', page: '' });
         try { await redrawArea(area); } catch { /* the next poll will try again */ }
     });
 
@@ -695,6 +695,30 @@
             working = false;
         });
     })();
+
+    // ---------- search by company in the results list (Enter or leaving the box) ----------
+    const applySearch = (input) => {
+        const area = input.closest('[data-list-prefix]');
+        if (!area) return;
+        setListParams(area, { q: input.value.trim(), page: '' });
+        redrawArea(area).catch(() => { /* the next poll will try again */ });
+    };
+    document.addEventListener('change', (event) => {
+        const input = event.target instanceof Element ? event.target.closest('[data-list-search]') : null;
+        if (input) applySearch(input);
+    });
+    document.addEventListener('keydown', (event) => {
+        const input = event.target instanceof Element ? event.target.closest('[data-list-search]') : null;
+        if (input && event.key === 'Enter') { event.preventDefault(); applySearch(input); }
+    });
+
+    // ---------- the replies card can be folded away; the choice is remembered in this browser ----------
+    if (localStorage.getItem('replies-collapsed') === '1') document.getElementById('replies')?.classList.add('collapsed');
+    document.addEventListener('click', (event) => {
+        if (!(event.target instanceof Element) || !event.target.closest('[data-replies-toggle]')) return;
+        const folded = document.getElementById('replies').classList.toggle('collapsed');
+        localStorage.setItem('replies-collapsed', folded ? '1' : '0');
+    });
 
     // ---------- Upload: drag & drop, paste, previews ----------
     const dropzone = document.getElementById('dropzone');

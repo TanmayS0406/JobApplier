@@ -50,9 +50,9 @@ public class HomeController : Controller
 
     /// <summary>The part of the dashboard that changes while jobs run (help requests + results table). Polled by the page.</summary>
     [HttpGet]
-    public IActionResult Live(int? page, int? size, string? sort, int? min, string? show = null)
+    public IActionResult Live(int? page, int? size, string? sort, int? min, string? show = null, string? q = null)
     {
-        var model = LiveViewModelBuilder.Build(_store, _runner.PausedUntilUtc, _replies, ListQuery.Create(page, size, sort, min, ListQuery.JobSorts, show, ListQuery.JobShows), _runner.HeldByUser);
+        var model = LiveViewModelBuilder.Build(_store, _runner.PausedUntilUtc, _replies, ListQuery.Create(page, size, sort, min, ListQuery.JobSorts, show, ListQuery.JobShows, q), _runner.HeldByUser);
         Response.Headers["X-Help-Count"] = model.Help.Count.ToString();
         Response.Headers.CacheControl = "no-store";
         return PartialView("_Live", model);

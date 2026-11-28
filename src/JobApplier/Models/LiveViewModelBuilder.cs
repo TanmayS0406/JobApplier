@@ -17,7 +17,7 @@ public static class LiveViewModelBuilder
             .ToList();
 
         var latestReply = replies?.StatusByJob() ?? new Dictionary<Guid, EmployerReply>();
-        var (page, info) = Paging.Slice(Sort(Filter(rows, query.MinMatch, query.Show, latestReply), query.Sort), query.Page, query.PageSize);
+        var (page, info) = Paging.Slice(Sort(Filter(rows, query.MinMatch, query.Show, latestReply, query.Search), query.Sort), query.Page, query.PageSize);
         return new LiveViewModel
         {
             Rows = page,
@@ -37,7 +37,7 @@ public static class LiveViewModelBuilder
     /// "Show": by what the employer answered (the same latest answer the Employer reply column shows), by no answer yet, or by being skipped.
     /// </summary>
     internal static IReadOnlyList<JobRow> Filter(IReadOnlyList<JobRow> rows, int minMatch, string show = "",
-                                                 IReadOnlyDictionary<Guid, EmployerReply>? latestReply = null)
+                                                 IReadOnlyDictionary<Guid, EmployerReply>? latestReply = null, string search = "")
     {
         latestReply ??= new Dictionary<Guid, EmployerReply>();
         IEnumerable<JobRow> kept = rows;
@@ -55,6 +55,7 @@ public static class LiveViewModelBuilder
                 _ => kept
             };
         }
+        if (search.Length > 0) kept = kept.Where(r => r.Company.Contains(search, StringComparison.OrdinalIgnoreCase));
         return kept as IReadOnlyList<JobRow> ?? kept.ToList();
     }
 

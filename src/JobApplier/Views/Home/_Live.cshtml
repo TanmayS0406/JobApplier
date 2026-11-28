@@ -102,6 +102,8 @@ else if (Model.PausedUntilUtc is DateTime pausedUntil)
     }
     else
     {
+        <div class="list-search"><input type="text" data-list-search="q" value="@Model.Query.Search" placeholder="Search by company" aria-label="Search jobs by company" /></div>
+
         @if (Model.Counts.Total > 1)
         {
             <partial name="_ListBar" model="jobBar" />

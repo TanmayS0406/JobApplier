@@ -290,3 +290,9 @@ a.chip:hover { text-decoration: none; border-color: var(--accent); }
 
 .inline-form { display: inline; margin: 0 .6rem; }
 input[data-model-input][hidden] { display: none; }
+
+/* ---- search in the results list, and the replies card folded away ---- */
+.list-search { margin: .4rem 0 .2rem; }
+.list-search input { width: min(20rem, 100%); }
+#replies.collapsed .replies-card > :not(.card-head) { display: none; }
+#replies.collapsed .when-open, #replies:not(.collapsed) .when-closed { display: none; }

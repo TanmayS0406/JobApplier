@@ -8,7 +8,7 @@ namespace JobApplier.Models;
 /// page actually offers: a hand-edited address can never ask for a 10,000-row page or an unknown sort.
 /// </summary>
 /// <param name="Show">Which rows to keep, by what the employer answered or how the job ended ("rejected", "info", "skipped", ...). Empty = all.</param>
-public sealed record ListQuery(int Page, int PageSize, string Sort, int MinMatch, string Show = "")
+public sealed record ListQuery(int Page, int PageSize, string Sort, int MinMatch, string Show = "", string Search = "")
 {
     public const string SortNewest = "new";
     public const string SortMatchHigh = "match-desc";
@@ -55,12 +55,13 @@ public sealed record ListQuery(int Page, int PageSize, string Sort, int MinMatch
     public static ListQuery Default { get; } = new(1, PageSizes[0], SortNewest, 0);
 
     public static ListQuery Create(int? page, int? size, string? sort, int? min, IReadOnlyList<string> allowedSorts,
-                                   string? show = null, IReadOnlyList<string>? allowedShows = null) => new(
+                                   string? show = null, IReadOnlyList<string>? allowedShows = null, string? search = null) => new(
         Math.Max(1, page ?? 1),
         size is { } s && PageSizes.Contains(s) ? s : PageSizes[0],
         sort is not null && allowedSorts.Contains(sort) ? sort : SortNewest,
         min is { } m && MinMatchChoices.Contains(m) ? m : 0,
-        show is not null && allowedShows != null && allowedShows.Contains(show) ? show : "");
+        show is not null && allowedShows != null && allowedShows.Contains(show) ? show : "",
+        search is { } t && t.Trim().Length > 0 ? t.Trim()[..Math.Min(80, t.Trim().Length)] : "");
 
     /// <summary>
     /// Reads <c>{prefix}_page</c>, <c>{prefix}_size</c>, <c>{prefix}_sort</c>, <c>{prefix}_min</c> and <c>{prefix}_show</c> from the dashboard's
@@ -73,7 +74,8 @@ public sealed record ListQuery(int Page, int PageSize, string Sort, int MinMatch
         int.TryParse(query[$"{prefix}_min"], out var min) ? min : null,
         allowedSorts,
         query[$"{prefix}_show"].FirstOrDefault(),
-        allowedShows);
+        allowedShows,
+        query[$"{prefix}_q"].FirstOrDefault());
 
     /// <summary>The values as route values, for the address a list polls. What is still the default is left out to keep it short.</summary>
     public RouteValueDictionary ToRoute()
@@ -84,6 +86,7 @@ public sealed record ListQuery(int Page, int PageSize, string Sort, int MinMatch
         if (Sort != SortNewest) route["sort"] = Sort;
         if (MinMatch > 0) route["min"] = MinMatch;
         if (Show.Length > 0) route["show"] = Show;
+        if (Search.Length > 0) route["q"] = Search;
         return route;
     }
 }
@@ -117,7 +120,7 @@ public static class Paging
 public sealed record ListBar(ListQuery Query, PageInfo Page, IReadOnlyList<(string Value, string Label)> Sorts, string Noun, int Unfiltered,
                              IReadOnlyList<(string Value, string Label)>? Shows = null)
 {
-    public bool IsFiltered => Query.MinMatch > 0 || Query.Show.Length > 0;
+    public bool IsFiltered => Query.MinMatch > 0 || Query.Show.Length > 0 || Query.Search.Length > 0;
 
     /// <summary>What the filter is set to, in words, for "Showing 1-3 of 3 (rejected, match at least 70%, 40 in total)".</summary>
     public string FilterText
@@ -126,6 +129,7 @@ public sealed record ListBar(ListQuery Query, PageInfo Page, IReadOnlyList<(stri
         {
             var parts = new List<string>();
             if (Query.Show.Length > 0) parts.Add((Shows?.FirstOrDefault(s => s.Value == Query.Show).Label ?? Query.Show).ToLowerInvariant());
+            if (Query.Search.Length > 0) parts.Add($"company \"{Query.Search}\"");
             if (Query.MinMatch > 0) parts.Add($"match at least {Query.MinMatch}%");
             return string.Join(", ", parts);
         }
